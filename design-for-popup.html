@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify SpyKit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            /* Colors */
+            --primary: #6366f1;
+            --primary-light: #e0e7ff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --text-light: #9ca3af;
+            --bg-body: #f3f4f6;
+            --bg-card: #ffffff;
+            --bg-hover: #f9fafb;
+            --border-color: #f3f4f6;
+            --border-dark: #e5e7eb;
+            
+            /* Status Colors */
+            --success: #10b981;
+            --success-bg: #ecfdf5;
+            --warning: #f59e0b;
+            --warning-bg: #fffbeb;
+            --info: #3b82f6;
+            --info-bg: #eff6ff;
+
+            /* Typography */
+            --font-family: 'Inter', sans-serif;
+            --text-xs: 0.75rem;
+            --text-sm: 0.875rem;
+            --text-base: 1rem;
+            --text-lg: 1.125rem;
+            --text-xl: 1.25rem;
+
+            /* Layout */
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* Main Container */
+        .app-container {
+            width: 900px; /* Slightly wider to accommodate 3 columns comfortably */
+            background: var(--bg-card);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-dark);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Header --- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            color: var(--primary);
+            width: 28px;
+            height: 28px;
+        }
+
+        .brand-title {
+            font-size: var(--text-xl);
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .badge-pro {
+            background-color: var(--primary-light);
+            color: var(--primary);
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 16px;
+            color: var(--text-muted);
+        }
+
+        .header-actions i {
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .header-actions i:hover {
+            color: var(--text-main);
+        }
+
+        /* --- Navigation --- */
+        .nav-tabs {
+            display: flex;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border-dark);
+            gap: 24px;
+        }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 16px 4px;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: var(--text-sm);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-main);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab i { width: 18px; height: 18px; }
+
+        /* --- Main Content Area --- */
+        .content {
+            padding: 24px;
+            flex: 1;
+            background-color: var(--bg-card);
+        }
+
+        .view {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .view.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- Reusable Components --- */
+        .card {
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            background: var(--bg-card);
+        }
+
+        .flex-between { display: flex; justify-content: space-between; align-items: center; }
+        .flex-center { display: flex; align-items: center; gap: 8px; }
+        
+        .btn {
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border-dark);
+            background: var(--bg-card);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: 0.2s;
+        }
+        .btn:hover { background: var(--bg-hover); }
+        .btn-primary {
+            background: var(--bg-card);
+            color: var(--primary);
+            border-color: var(--primary-light);
+        }
+
+        .tag {
+            padding: 4px 10px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-xs);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* --- Overview Tab Styles --- */
+        .overview-top-card {
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .store-url {
+            font-size: var(--text-lg);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .status-dot {
+            width: 8px; height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .overview-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .stat-card {
+            padding: 16px;
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-md);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .stat-card:hover { border-color: var(--primary); }
+        .stat-header { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--text-sm); }
+        .stat-icon { color: var(--primary); width: 20px; height: 20px; background: var(--primary-light); padding: 4px; border-radius: 6px; }
+        .stat-value { font-size: var(--text-lg); font-weight: 600; }
+        .stat-link { color: var(--primary); font-size: var(--text-xs); font-weight: 500; margin-top: 4px; }
+
+        .section-title { font-size: var(--text-base); font-weight: 600; margin-bottom: 16px; }
+        
+        .quick-actions-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        .action-card {
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .action-card:hover { background: var(--bg-hover); }
+        .action-icon {
+            padding: 8px;
+            border-radius: var(--radius-md);
+        }
+        .action-icon.purple { background: var(--primary-light); color: var(--primary); }
+        .action-icon.orange { background: var(--warning-bg); color: var(--warning); }
+        .action-icon.blue { background: var(--info-bg); color: var(--info); }
+        .action-icon.green { background: var(--success-bg); color: var(--success); }
+        
+        .action-text h4 { font-size: var(--text-sm); font-weight: 500; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;}
+        .action-text p { font-size: var(--text-xs); color: var(--text-muted); }
+
+        /* --- Theme Tab Styles --- */
+        .theme-layout {
+            display: grid;
+            /* Info (grows) + narrow side cards */
+            grid-template-columns: 1fr 200px;
+            gap: 24px;
+            margin-bottom: 24px;
+            align-items: stretch;
+        }
+
+        .theme-info-middle {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            min-width: 0;
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            background: var(--bg-card);
+        }
+        .theme-info-header h2 { font-size: 28px; display: flex; align-items: center; gap: 8px; margin: 8px 0;}
+        .theme-info-header p { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: 12px;}
+        .theme-link { color: var(--primary); text-decoration: none; font-size: var(--text-sm); font-weight: 500; }
+        
+        .theme-side-cards { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 16px; 
+            justify-content: space-between;
+        }
+        .side-card { 
+            padding: 16px; 
+            border: 1px solid var(--border-dark); 
+            border-radius: var(--radius-lg); 
+            display: flex; 
+            gap: 12px;
+            background: var(--bg-card);
+            flex: 1; /* Stretches cards to match column height nicely */
+            align-items: center;
+        }
+        .side-card-icon { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
+        .side-card-icon.purple { background: var(--primary-light); color: var(--primary); }
+        .side-card-icon.green { background: var(--success-bg); color: var(--success); }
+        .side-card h4 { font-size: var(--text-lg); font-weight: 600; margin-bottom: 2px; }
+        .side-card p { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.3;}
+
+        .theme-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 16px;
+            padding: 16px;
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-lg);
+            margin-bottom: 24px;
+        }
+        .meta-item { display: flex; flex-direction: column; gap: 4px; }
+        .meta-label { font-size: var(--text-xs); color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+        .meta-value { font-size: var(--text-sm); font-weight: 500; }
+
+        .theme-files-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .file-card { padding: 12px; border: 1px solid var(--border-dark); border-radius: var(--radius-md); text-align: center;}
+        .file-icon { margin-bottom: 8px; width: 24px; height: 24px; margin-inline: auto; }
+        .file-count { font-size: var(--text-lg); font-weight: 600; }
+        .file-type { font-size: var(--text-xs); color: var(--text-muted); }
+
+        /* --- Apps Tab Styles --- */
+        .apps-filter-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .search-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-md);
+            width: 250px;
+        }
+        .search-input input { border: none; outline: none; font-size: var(--text-sm); width: 100%; }
+        
+        .filter-pills { display: flex; gap: 8px; font-size: var(--text-sm); color: var(--text-muted); }
+        .pill { padding: 6px 12px; border-radius: var(--radius-full); cursor: pointer; }
+        .pill.active { background: var(--primary-light); color: var(--primary); font-weight: 500; border: 1px solid var(--primary-light);}
+
+        .apps-list { border: 1px solid var(--border-dark); border-radius: var(--radius-lg); overflow: hidden;}
+        .app-item {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid var(--border-dark);
+            justify-content: space-between;
+            background: var(--bg-card);
+        }
+        .app-item:last-child { border-bottom: none; }
+        .app-info-left { display: flex; align-items: center; gap: 16px; }
+        .app-logo { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white;}
+        .app-logo.green { background: #64b34b; }
+        .app-logo.black { background: #1a1a1a; }
+        .app-logo.teal { background: #1eb3b3; }
+        .app-logo.yellow { background: #ffc200; color: black; }
+        .app-name { font-weight: 500; font-size: var(--text-sm); margin-bottom: 4px; }
+        .app-rating { display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--text-muted); }
+        .star { color: var(--warning); width: 14px; height: 14px; fill: var(--warning); }
+        
+        .app-category { color: var(--text-muted); font-size: var(--text-sm); display: flex; align-items: center; gap: 6px; width: 150px; }
+        .app-category i { width: 16px; height: 16px; }
+
+        .pagination { display: flex; justify-content: center; gap: 8px; padding: 16px; align-items: center;}
+        .pagination.flex-between { justify-content: space-between; }
+        .page-btn { 
+            width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border-dark); border-radius: var(--radius-sm);
+            font-size: var(--text-sm); cursor: pointer; color: var(--text-muted);
+        }
+        .page-btn.active { background: var(--primary-light); color: var(--primary); border-color: var(--primary-light); font-weight: 600;}
+
+        /* --- Footer --- */
+        .footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-hover);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .footer-left { display: flex; gap: 12px; align-items: center; }
+        .shield-icon { color: var(--success); background: var(--success-bg); padding: 8px; border-radius: var(--radius-md); }
+        .footer-text p { font-size: var(--text-sm); color: var(--text-muted); }
+        .footer-text p:first-child { color: var(--text-main); font-weight: 500; }
+        
+        .footer-right { display: flex; align-items: center; gap: 24px; }
+        .sync-info { font-size: var(--text-sm); color: var(--text-muted); display: flex; flex-direction: column; gap: 6px;}
+        .sync-text { display: flex; align-items: center; gap: 6px; }
+        .progress-bar { width: 200px; height: 6px; background: var(--border-dark); border-radius: var(--radius-full); overflow: hidden; }
+        .progress-fill { width: 20%; height: 100%; background: var(--primary); border-radius: var(--radius-full); }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    
+    <header class="header">
+        <div class="brand">
+            <i data-lucide="incognito" class="brand-icon"></i>
+            <span class="brand-title">Shopify SpyKit</span>
+            <span class="badge-pro"><i data-lucide="star" style="width: 12px; height: 12px;"></i> Pro</span>
+        </div>
+        <div class="header-actions">
+            <i data-lucide="settings"></i>
+            <i data-lucide="moon"></i>
+            <i data-lucide="more-vertical"></i>
+        </div>
+    </header>
+
+    <nav class="nav-tabs">
+        <div class="tab" data-target="overview"><i data-lucide="home"></i> Overview</div>
+        <div class="tab active" data-target="theme"><i data-lucide="palette"></i> Theme</div>
+        <div class="tab" data-target="apps"><i data-lucide="grid-2x2"></i> Apps</div>
+        <div class="tab"><i data-lucide="box"></i> Scraper</div>
+        <div class="tab"><i data-lucide="download"></i> Downloads</div>
+        <div class="tab"><i data-lucide="file-output"></i> Export</div>
+    </nav>
+
+    <main class="content">
+        
+        <div id="overview" class="view">
+            <div class="card overview-top-card">
+                <div class="flex-between">
+                    <div class="flex-center">
+                        <div class="app-logo green" style="width: 32px; height: 32px; border-radius: 6px;"><i data-lucide="shopping-bag" style="width: 16px; color: white;"></i></div>
+                        <span class="store-url">example-store.myshopify.com <div class="tag" style="background: var(--success-bg); color: var(--success);"><span class="status-dot"></span> Connected</div></span>
+                    </div>
+                    <button class="btn">View Report <i data-lucide="arrow-right" style="width: 16px;"></i></button>
+                </div>
+                <div style="margin-top: 8px; color: var(--text-muted); font-size: var(--text-sm); margin-left: 40px;">
+                    Dawn &bull; v15.3.0 &bull; OS 2.0
+                </div>
+
+                <div class="overview-stats">
+                    <div class="stat-card">
+                        <div class="stat-header"><i data-lucide="palette" class="stat-icon" style="color: var(--primary); background: var(--primary-light);"></i> Theme</div>
+                        <div class="stat-value flex-center">Dawn <i data-lucide="check-circle-2" style="color: var(--success); width: 16px;"></i></div>
+                        <div class="stat-link">Details ></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header"><i data-lucide="puzzle" class="stat-icon" style="color: var(--info); background: var(--info-bg);"></i> Apps</div>
+                        <div class="stat-value">12</div>
+                        <div class="stat-link">View ></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header"><i data-lucide="package" class="stat-icon" style="color: var(--success); background: var(--success-bg);"></i> Products</div>
+                        <div class="stat-value">2,542</div>
+                        <div class="stat-link">View ></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header"><i data-lucide="folder" class="stat-icon" style="color: var(--warning); background: var(--warning-bg);"></i> Collections</div>
+                        <div class="stat-value">18</div>
+                        <div class="stat-link">View ></div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 class="section-title">Quick Actions</h3>
+            <div class="quick-actions-grid">
+                <div class="action-card">
+                    <i data-lucide="package" class="action-icon purple"></i>
+                    <div class="action-text">
+                        <h4>Scrape Products <i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Extract all products</p>
+                    </div>
+                </div>
+                <div class="action-card">
+                    <i data-lucide="folder" class="action-icon orange"></i>
+                    <div class="action-text">
+                        <h4>By Collection <i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Scrape by collection</p>
+                    </div>
+                </div>
+                <div class="action-card">
+                    <i data-lucide="download" class="action-icon blue"></i>
+                    <div class="action-text">
+                        <h4>Download Images <i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Download all images</p>
+                    </div>
+                </div>
+                <div class="action-card">
+                    <i data-lucide="file-spreadsheet" class="action-icon green"></i>
+                    <div class="action-text">
+                        <h4>Export to CSV <i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Shopify import format</p>
+                    </div>
+                </div>
+                <div class="action-card">
+                    <i data-lucide="table" class="action-icon green"></i>
+                    <div class="action-text">
+                        <h4>Export to XLSX <i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Excel with data types</p>
+                    </div>
+                </div>
+                <div class="action-card">
+                    <i data-lucide="tag" class="action-icon purple"></i>
+                    <div class="action-text">
+                        <h4>Slow Mode <span class="badge-pro" style="padding: 0 4px; font-size: 10px;">Pro</span><i data-lucide="chevron-right" style="width: 14px; margin-left: auto;"></i></h4>
+                        <p>Get more fields</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="theme" class="view active">
+            <div class="theme-layout">
+
+                <div class="theme-info-middle">
+                    <div style="margin-bottom: 12px;">
+                        <div class="tag" style="background: var(--primary-light); color: var(--primary); display: inline-flex;">Live theme</div>
+                    </div>
+                    <div class="theme-info-header">
+                        <h2>Dawn <i data-lucide="edit-2" style="width: 16px; color: var(--text-muted); cursor: pointer;"></i></h2>
+                        <p class="flex-center" style="color: var(--text-main); font-weight: 500; margin-bottom: 16px;">
+                            <i data-lucide="shopping-bag" style="color: var(--success); width: 16px;"></i> by Shopify
+                        </p>
+                        <p style="margin-bottom: 16px;">Version 15.3.0 &bull; Published: May 15, 2024</p>
+                        <a href="#" class="theme-link flex-center">View on Shopify Theme Store <i data-lucide="arrow-up-right" style="width: 16px;"></i></a>
+                    </div>
+                </div>
+
+                <div class="theme-side-cards">
+                    <div class="side-card">
+                        <div class="side-card-icon purple"><i data-lucide="users"></i></div>
+                        <div>
+                            <h4>21,842</h4>
+                            <p>Other stores using this theme</p>
+                        </div>
+                    </div>
+                    <div class="side-card">
+                        <div class="side-card-icon green"><i data-lucide="shield-check"></i></div>
+                        <div>
+                            <h4>OS 2.0</h4>
+                            <p>Online Store 2.0 Compatible</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="theme-meta-grid">
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="user"></i> Author</span>
+                    <span class="meta-value">Shopify</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="file-text"></i> License</span>
+                    <span class="meta-value">MIT License</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="layout-grid"></i> Layout</span>
+                    <span class="meta-value">3 styles</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="calendar"></i> Last updated</span>
+                    <span class="meta-value">May 15, 2024</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="hard-drive"></i> File size</span>
+                    <span class="meta-value">1.42 MB</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label"><i data-lucide="life-buoy"></i> Support</span>
+                    <a href="#" class="theme-link flex-center" style="font-size: var(--text-sm);">Documentation <i data-lucide="arrow-up-right" style="width: 14px;"></i></a>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="flex-between">
+                    <div>
+                        <h3 style="font-size: var(--text-sm); font-weight: 600; display: flex; align-items:center; gap: 8px;"><i data-lucide="file-code-2" style="width: 16px;"></i> Theme Files</h3>
+                        <p style="font-size: var(--text-xs); color: var(--text-muted);">Key files and structure information</p>
+                    </div>
+                    <button class="btn">View all files <i data-lucide="chevron-right" style="width: 16px;"></i></button>
+                </div>
+                <div class="theme-files-grid">
+                    <div class="file-card" style="background: var(--bg-hover);">
+                        <i data-lucide="activity" class="file-icon" style="color: var(--info);"></i>
+                        <div class="file-count">312</div>
+                        <div class="file-type">.liquid files</div>
+                    </div>
+                    <div class="file-card">
+                        <i data-lucide="folder" class="file-icon" style="color: var(--warning);"></i>
+                        <div class="file-count">89</div>
+                        <div class="file-type">/sections</div>
+                    </div>
+                    <div class="file-card">
+                        <i data-lucide="code" class="file-icon" style="color: var(--primary);"></i>
+                        <div class="file-count">54</div>
+                        <div class="file-type">/snippets</div>
+                    </div>
+                    <div class="file-card">
+                        <i data-lucide="image" class="file-icon" style="color: var(--success);"></i>
+                        <div class="file-count">186</div>
+                        <div class="file-type">/assets</div>
+                    </div>
+                    <div class="file-card">
+                        <i data-lucide="layout-template" class="file-icon" style="color: #f97316;"></i>
+                        <div class="file-count">28</div>
+                        <div class="file-type">/templates</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="apps" class="view">
+            <div class="apps-filter-bar">
+                <div class="search-input">
+                    <i data-lucide="search" style="color: var(--text-muted); width: 16px;"></i>
+                    <input type="text" placeholder="Search apps by name...">
+                </div>
+                <div class="filter-pills">
+                    <div class="pill active">All (24)</div>
+                    <div class="pill">Marketing (8)</div>
+                    <div class="pill">Sales (6)</div>
+                    <div class="pill">Reviews (4)</div>
+                    <div class="pill">Analytics (3)</div>
+                    <div class="pill flex-center">Other (3) <i data-lucide="chevron-down" style="width: 14px;"></i></div>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; font-size: var(--text-sm); font-weight: 500; margin-bottom: 12px; padding: 0 4px;">
+                <span>24 apps detected</span>
+                <span style="color: var(--text-muted);">Page 1 of 5</span>
+            </div>
+
+            <div class="apps-list">
+                <div class="app-item">
+                    <div class="app-info-left">
+                        <div class="app-logo green">S</div>
+                        <div>
+                            <div class="app-name">Shopify Search & Discovery</div>
+                            <div class="app-rating"><i data-lucide="star" class="star"></i> 4.6 (1,234 reviews)</div>
+                        </div>
+                    </div>
+                    <div class="app-category"><i data-lucide="tag" style="color: var(--primary);"></i> Sales <i data-lucide="chevron-right" style="margin-left: auto; color: var(--text-muted);"></i></div>
+                </div>
+
+                <div class="app-item">
+                    <div class="app-info-left">
+                        <div class="app-logo black" style="font-size: 10px;">klaviyo</div>
+                        <div>
+                            <div class="app-name">Klaviyo: Email Marketing & SMS</div>
+                            <div class="app-rating"><i data-lucide="star" class="star"></i> 4.7 (2,512 reviews)</div>
+                        </div>
+                    </div>
+                    <div class="app-category"><i data-lucide="mail" style="color: var(--success);"></i> Marketing <i data-lucide="chevron-right" style="margin-left: auto; color: var(--text-muted);"></i></div>
+                </div>
+
+                <div class="app-item">
+                    <div class="app-info-left">
+                        <div class="app-logo teal" style="font-size: 10px;">LOOX</div>
+                        <div>
+                            <div class="app-name">Loox Product Reviews & Photos</div>
+                            <div class="app-rating"><i data-lucide="star" class="star"></i> 4.9 (8,419 reviews)</div>
+                        </div>
+                    </div>
+                    <div class="app-category"><i data-lucide="message-square" style="color: var(--info);"></i> Reviews <i data-lucide="chevron-right" style="margin-left: auto; color: var(--text-muted);"></i></div>
+                </div>
+
+                <div class="app-item">
+                    <div class="app-info-left">
+                        <div class="app-logo yellow" style="font-size: 10px;">smile</div>
+                        <div>
+                            <div class="app-name">Smile: Loyalty & Rewards</div>
+                            <div class="app-rating"><i data-lucide="star" class="star"></i> 4.8 (3,871 reviews)</div>
+                        </div>
+                    </div>
+                    <div class="app-category"><i data-lucide="tag" style="color: var(--primary);"></i> Marketing <i data-lucide="chevron-right" style="margin-left: auto; color: var(--text-muted);"></i></div>
+                </div>
+
+                <div class="app-item">
+                    <div class="app-info-left">
+                        <div class="app-logo" style="background: white; border: 1px solid var(--border-dark); color: var(--success);"><i data-lucide="trending-up"></i></div>
+                        <div>
+                            <div class="app-name">Google & YouTube</div>
+                            <div class="app-rating"><i data-lucide="star" class="star"></i> 4.5 (1,103 reviews)</div>
+                        </div>
+                    </div>
+                    <div class="app-category"><i data-lucide="bar-chart-2" style="color: var(--warning);"></i> Analytics <i data-lucide="chevron-right" style="margin-left: auto; color: var(--text-muted);"></i></div>
+                </div>
+
+                <div class="pagination flex-between">
+                    <div style="display: flex; gap: 4px;">
+                        <div class="page-btn"><i data-lucide="chevron-left" style="width: 16px;"></i></div>
+                        <div class="page-btn active">1</div>
+                        <div class="page-btn">2</div>
+                        <div class="page-btn">3</div>
+                        <div class="page-btn">4</div>
+                        <div class="page-btn">5</div>
+                        <div class="page-btn"><i data-lucide="chevron-right" style="width: 16px;"></i></div>
+                    </div>
+                    <div class="btn" style="padding: 4px 12px;">5 per page <i data-lucide="chevron-down" style="width: 14px;"></i></div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="footer">
+        <div class="footer-left">
+            <i data-lucide="shield-check" class="shield-icon"></i>
+            <div class="footer-text">
+                <p>Minimal permissions.</p>
+                <p>Your data stays private.</p>
+            </div>
+        </div>
+        <div class="footer-right">
+            <div class="sync-info">
+                <div class="sync-text">100 free syncs left <i data-lucide="info" style="width: 14px; color: var(--text-light);"></i></div>
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+            </div>
+            <button class="btn btn-primary"><i data-lucide="star" style="width: 16px;"></i> Upgrade</button>
+        </div>
+    </footer>
+</div>
+
+<script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Tab Switching Logic
+    const tabs = document.querySelectorAll('.tab[data-target]');
+    const views = document.querySelectorAll('.view');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all tabs and views
+            tabs.forEach(t => t.classList.remove('active'));
+            views.forEach(v => v.classList.remove('active'));
+
+            // Add active class to clicked tab and corresponding view
+            tab.classList.add('active');
+            const targetId = tab.getAttribute('data-target');
+            document.getElementById(targetId).classList.add('active');
+        });
+    });
+</script>
+
+</body>
+</html>

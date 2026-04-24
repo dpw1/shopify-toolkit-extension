@@ -1,0 +1,131 @@
+@import 'base';
+
+$text-padding: 20px;
+
+.Details {
+  display: block;
+  &-title {
+    color: $main-color;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 0;
+  }
+  &-subtitle {
+    font-weight: 500;
+    font-size: $subtitle-text-size;
+    text-align: left;
+    margin-top: -5px;
+  }
+
+  &-info {
+    background: white;
+    border-radius: $border-radius-medium;
+    // max-width: 300px;
+    margin: 0 auto;
+    width: 100%;
+    box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px,
+      rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;
+  }
+
+  &-row {
+    // height: 40px;
+    // line-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-evenly;
+    height: 45px;
+    border-bottom: 1px solid #e7e8e9;
+  }
+
+  &-text {
+    font-size: $font-size-h5;
+
+    color: $text-color;
+    min-width: 50%;
+    width: 100%;
+
+    &--left {
+      padding-right: 5px;
+      font-weight: bold;
+      text-align: right;
+      padding-right: $text-padding;
+    }
+
+    &--right {
+      font-weight: 500;
+      text-align: left;
+      padding-left: $text-padding;
+      display: flex;
+      align-items: center;
+
+      & > * {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
+        max-width: 70%;
+        display: block;
+      }
+    }
+
+    &--free {
+      background: $green-light;
+      color: $green;
+      border-radius: 5px;
+      max-width: 50px;
+      width: auto;
+      display: inline-block;
+      padding: 1px 10px;
+    }
+
+    &--group {
+      font-size: $font-size-small;
+    }
+  }
+
+  &-logo {
+    margin-top: 0;
+    font-weight: 700;
+    text-align: left;
+    font-size: $font-size-h1;
+  }
+
+  &-content {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: flex-start;
+    margin-bottom: 15px;
+    font-size: 14px;
+    text-align: left;
+
+    > *:nth-child(1) {
+      margin-right: 10px;
+      max-width: 55px;
+      width: 100%;
+    }
+    > *:nth-child(2) {
+      width: 100%;
+      max-width: 140px;
+    }
+  }
+
+  &-message {
+    font-size: 14px;
+  }
+
+  &-column {
+    max-width: 50%;
+    display: inline-block;
+    width: 100%;
+    margin-left: -4px;
+    vertical-align: top;
+  }
+
+  &--loading {
+    min-height: 338px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

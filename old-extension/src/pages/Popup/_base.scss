@@ -1,0 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;500;600&display=swap');
+
+$wrapper: 500px;
+
+$font-size-h1: 22px;
+$font-size-h2: 20px;
+$font-size-h3: 18px;
+$font-size-h4: 16px;
+$font-size-h5: 14px;
+$font-size-h6: 12px;
+$font-size-small: 11px;
+
+$title-text-size: $font-size-h1;
+$subtitle-text-size: $font-size-h5;
+
+$main-color: #ff543d;
+$text-color: #313c47;
+$green: #0c2822;
+$green-light: #00ebb7;
+
+$border-radius-medium: 12px;
+$box-shadow-1: rgba(50, 50, 93, 0.25) 0px 13px 27px -5px,
+  rgba(0, 0, 0, 0.3) 0px 8px 16px -8px;

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-zip/
+*.zip
+.env
+.env.production
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+*.log
