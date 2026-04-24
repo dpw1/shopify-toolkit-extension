@@ -9,7 +9,7 @@
  *     and relay them to the background service worker.
  */
 
-import type { ExtMessage, MsgPageData, ShopMetaJson } from '../types'
+import type { ExtMessage, MsgPageData, ShopMetaJson, StoreContacts } from '../types'
 
 declare const __APP_MODE__: string
 const IS_DEV = __APP_MODE__ === 'development'
@@ -36,17 +36,6 @@ function isShopify(): boolean {
 
 // ─── Page-world injection ────────────────────────────────────────────────────
 
-/** Same as storefront: `<meta name="author" content="…">` (name matching is case-insensitive). */
-function readStoreNameFromAuthorMeta(): string | undefined {
-  for (const el of document.querySelectorAll('meta[name]')) {
-    const name = el.getAttribute('name')
-    if (!name || name.toLowerCase() !== 'author') continue
-    const c = el.getAttribute('content')?.trim()
-    if (c && c.length > 0) return c
-  }
-  return undefined
-}
-
 /** Shopify exposes shop metadata at the storefront root: `/meta.json`. */
 async function fetchAndSendShopMeta(): Promise<void> {
   try {
@@ -61,6 +50,72 @@ async function fetchAndSendShopMeta(): Promise<void> {
     } satisfies ExtMessage)
   } catch {
     /* non-Shopify theme, offline, CORS edge, etc. */
+  }
+}
+
+// ─── Store contacts (social links + emails from storefront DOM) ───────────────
+
+/** Reads social profile links and contact emails from the current page DOM. */
+function collectStoreContacts(): StoreContacts {
+  const socialRules: Record<string, { pattern: RegExp; blacklist: string[] }> = {
+    instagram: { pattern: /instagram\.com\//, blacklist: ['/p/', '/reel/', '/explore/', '/stories/'] },
+    facebook:  { pattern: /facebook\.com\//, blacklist: ['/sharer', '/share', '/dialog/', '/watch/', '/groups/'] },
+    twitter:   { pattern: /twitter\.com\//, blacklist: ['/share', '/intent/', '/hashtag/'] },
+    x:         { pattern: /x\.com\//, blacklist: ['/share', '/intent/', '/i/'] },
+    tiktok:    { pattern: /tiktok\.com\/@/, blacklist: [] },
+    youtube:   { pattern: /youtube\.com\/(channel\/|c\/|@|user\/)/, blacklist: ['/watch', '/shorts/', '/playlist', '/embed/'] },
+    pinterest: { pattern: /pinterest\.com\//, blacklist: ['/pin/', '/search/', '/explore/'] },
+    linkedin:  { pattern: /linkedin\.com\/(company|in)\//, blacklist: ['/sharing/', '/share'] },
+    snapchat:  { pattern: /snapchat\.com\/add\//, blacklist: [] },
+    vimeo:     { pattern: /vimeo\.com\/(channels\/|groups\/|[a-zA-Z][a-zA-Z0-9]+)/, blacklist: ['/video/', '/ondemand/', '/showcase/'] },
+  }
+
+  const emailBlacklist = [
+    'sentry.io', 'example.com', 'yourdomain', 'domain.com',
+    'shopify.com', 'cdn.shopify', 'wixpress.com', 'test.com',
+  ]
+  const emailPattern = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+
+  const social: Record<string, string> = {}
+  const emailsFound = new Set<string>()
+
+  document.querySelectorAll('a[href]').forEach((el) => {
+    const href = (el as HTMLAnchorElement).getAttribute('href') || ''
+    for (const [platform, rules] of Object.entries(socialRules)) {
+      if (social[platform]) continue
+      if (!rules.pattern.test(href)) continue
+      if (rules.blacklist.some((b) => href.includes(b))) continue
+      social[platform] = href
+    }
+  })
+
+  document.querySelectorAll('a[href^="mailto:"]').forEach((el) => {
+    const raw = (el as HTMLAnchorElement).getAttribute('href') || ''
+    const email = raw.replace('mailto:', '').split('?')[0].trim().toLowerCase()
+    if (email && !emailBlacklist.some((ex) => email.includes(ex))) {
+      emailsFound.add(email)
+    }
+  })
+
+  const bodyText = document.body?.innerText || ''
+  for (const e of bodyText.match(emailPattern) || []) {
+    if (!emailBlacklist.some((ex) => e.includes(ex))) emailsFound.add(e.toLowerCase())
+  }
+
+  return { social, emails: [...emailsFound] }
+}
+
+function sendStoreContacts() {
+  try {
+    const contacts = collectStoreContacts()
+    chrome.runtime.sendMessage({
+      type: 'STORE_CONTACTS',
+      from: 'content',
+      payload: { domain: location.hostname, contacts },
+    } satisfies ExtMessage)
+    log('Sent STORE_CONTACTS', { emails: contacts.emails.length, socials: Object.keys(contacts.social) })
+  } catch {
+    /* ignore */
   }
 }
 
@@ -93,13 +148,8 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'PAGE_DATA') {
     const m = msg as MsgPageData
     const p = m.payload
-    // Re-read from this isolated world (same DOM as the page). Do not spread `event.data` — it
-    // includes `__spykit`, which can confuse some paths; send a clean MV3 message.
-    const storeNameFromContent = readStoreNameFromAuthorMeta()
-    const storeName =
-      storeNameFromContent ??
-      (typeof p.storeName === 'string' && p.storeName.trim() ? p.storeName.trim() : undefined)
-
+    // Do not spread `event.data` — it includes `__spykit`; send a clean MV3 message.
+    // Store display name comes from `/meta.json` (`SHOP_META`), not meta author.
     chrome.runtime.sendMessage({
       type: 'PAGE_DATA',
       from: 'content',
@@ -113,7 +163,6 @@ window.addEventListener('message', (event) => {
         shopifyThemeRaw: p.shopifyThemeRaw,
         productsSample: p.productsSample,
         collectionsSample: p.collectionsSample,
-        ...(storeName != null ? { storeName } : {}),
       },
     } satisfies ExtMessage)
     return
@@ -142,6 +191,8 @@ function init() {
 
   injectPageWorld()
   void fetchAndSendShopMeta()
+  // Delay so lazy-loaded footer links / mailto tags are in the DOM
+  setTimeout(sendStoreContacts, 2000)
 }
 
 if (document.readyState === 'loading') {

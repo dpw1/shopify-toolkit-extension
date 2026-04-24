@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify SpyKit - Store Tab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            /* Colors */
+            --primary: #6366f1;
+            --primary-light: #e0e7ff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --text-light: #9ca3af;
+            --bg-body: #f3f4f6;
+            --bg-card: #ffffff;
+            --bg-hover: #f9fafb;
+            --border-color: #f3f4f6;
+            --border-dark: #e5e7eb;
+            
+            /* Status Colors */
+            --success: #10b981;
+            --success-bg: #ecfdf5;
+            --warning: #f59e0b;
+            --warning-bg: #fffbeb;
+            --info: #3b82f6;
+            --info-bg: #eff6ff;
+
+            /* Typography */
+            --font-family: 'Inter', sans-serif;
+            --text-xs: 0.75rem;
+            --text-sm: 0.875rem;
+            --text-base: 1rem;
+            --text-lg: 1.125rem;
+            --text-xl: 1.25rem;
+
+            /* Layout */
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 9999px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* Main Container */
+        .app-container {
+            width: 900px;
+            background: var(--bg-card);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-dark);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Header --- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            color: var(--primary);
+            width: 28px;
+            height: 28px;
+        }
+
+        .brand-title {
+            font-size: var(--text-xl);
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .badge-pro {
+            background-color: var(--primary-light);
+            color: var(--primary);
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 16px;
+            color: var(--text-muted);
+        }
+
+        .header-actions i {
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .header-actions i:hover {
+            color: var(--text-main);
+        }
+
+        /* --- Navigation --- */
+        .nav-tabs {
+            display: flex;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border-dark);
+            gap: 24px;
+        }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 16px 4px;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: var(--text-sm);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover { color: var(--text-main); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab i { width: 18px; height: 18px; }
+
+        /* --- Main Content Area --- */
+        .content {
+            padding: 24px;
+            flex: 1;
+            background-color: var(--bg-card);
+        }
+
+        /* --- Reusable Components --- */
+        .card {
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            background: var(--bg-card);
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border-dark);
+            background: var(--bg-card);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: 0.2s;
+        }
+        .btn:hover { background: var(--bg-hover); }
+        .btn-primary { background: var(--bg-card); color: var(--primary); border-color: var(--primary-light); }
+
+        /* --- Store Tab Specific Styles --- */
+        .store-top-card {
+            margin-bottom: 24px;
+        }
+        .store-main-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .store-identity {
+            display: flex;
+            gap: 16px;
+        }
+        .store-logo {
+            width: 56px;
+            height: 56px;
+            background-color: #95D79B; /* Shopify pale green */
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 700;
+            color: white;
+            font-family: serif;
+        }
+        .store-title-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+        .store-title-row h2 {
+            font-size: var(--text-xl);
+            font-weight: 700;
+        }
+        .badge-active {
+            background-color: var(--success-bg);
+            color: var(--success);
+            padding: 4px 10px;
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .badge-active .dot {
+            width: 6px; height: 6px;
+            background-color: var(--success);
+            border-radius: 50%;
+        }
+        .store-links {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .store-links a {
+            color: var(--primary);
+            text-decoration: none;
+            font-size: var(--text-sm);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .store-email {
+            color: var(--text-muted);
+            font-size: var(--text-sm);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .store-stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-top: 24px;
+        }
+        .stat-box {
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: border-color 0.2s;
+            cursor: pointer;
+        }
+        .stat-box:hover { border-color: var(--primary); }
+        .stat-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: var(--text-sm);
+        }
+        .stat-icon {
+            width: 24px; height: 24px;
+            padding: 4px;
+            border-radius: 6px;
+        }
+        .stat-icon.purple { background: var(--primary-light); color: var(--primary); }
+        .stat-icon.blue { background: var(--info-bg); color: var(--info); }
+        .stat-icon.green { background: var(--success-bg); color: var(--success); }
+        .stat-icon.orange { background: var(--warning-bg); color: var(--warning); }
+        
+        .stat-value {
+            font-size: var(--text-lg);
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .stat-link {
+            color: var(--primary);
+            font-size: var(--text-xs);
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        /* --- Store Intelligence Section --- */
+        .section-title {
+            font-size: var(--text-base);
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .intelligence-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 16px;
+        }
+
+        .intel-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dark);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+        .intel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: var(--text-sm);
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+        .intel-header .icon {
+            width: 24px; height: 24px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .intel-header .icon i { width: 14px; height: 14px; }
+        .icon.purple { background: var(--primary-light); color: var(--primary); }
+        .icon.green { background: var(--success-bg); color: var(--success); }
+        .icon.blue { background: var(--info-bg); color: var(--info); }
+        .icon.orange { background: var(--warning-bg); color: var(--warning); }
+        .icon.gray { background: var(--bg-body); color: var(--text-muted); }
+
+        .intel-value {
+            font-size: var(--text-base);
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+        .intel-sub {
+            font-size: var(--text-sm);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .flag {
+            font-size: 16px;
+        }
+
+        /* Specific Grid Placements */
+        .col-3 { grid-column: span 3; }
+        .col-4 { grid-column: span 4; }
+        .col-5 { grid-column: span 5; }
+
+        /* Social Media Icons (Uniform styling as requested) */
+        .social-icons-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .social-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-dark);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .social-icon:hover {
+            color: var(--primary);
+            border-color: var(--primary-light);
+            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.1);
+            transform: translateY(-1px);
+        }
+        .social-icon i { width: 16px; height: 16px; }
+
+        /* Payment Icons styling */
+        .payment-methods {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .pay-badge {
+            background: var(--bg-body);
+            border: 1px solid var(--border-dark);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 24px;
+        }
+        .pay-badge.visa { color: #1a1f71; }
+        .pay-badge.mc { gap: -2px; }
+        .mc-circle { width: 10px; height: 10px; border-radius: 50%; mix-blend-mode: multiply;}
+        .mc-red { background: #eb001b; transform: translateX(2px); }
+        .mc-orange { background: #f79e1b; transform: translateX(-2px);}
+        .pay-badge.amex { background: #007bc1; color: white; border: none; }
+        .pay-badge.discover { color: #ff6000; }
+        .pay-badge.diners { color: #004b8d; }
+        
+        .shop-pay-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: var(--text-sm);
+            font-weight: 500;
+        }
+        .status-badge {
+            background: var(--success-bg);
+            color: var(--success);
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* --- Footer --- */
+        .footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-hover);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .footer-left { display: flex; gap: 12px; align-items: center; }
+        .shield-icon { color: var(--success); background: var(--success-bg); padding: 8px; border-radius: var(--radius-md); }
+        .footer-text p { font-size: var(--text-sm); color: var(--text-muted); }
+        .footer-text p:first-child { color: var(--text-main); font-weight: 500; }
+        
+        .footer-right { display: flex; align-items: center; gap: 24px; }
+        .sync-info { font-size: var(--text-sm); color: var(--text-muted); display: flex; flex-direction: column; gap: 6px;}
+        .sync-text { display: flex; align-items: center; gap: 6px; }
+        .progress-bar { width: 200px; height: 6px; background: var(--border-dark); border-radius: var(--radius-full); overflow: hidden; }
+        .progress-fill { width: 20%; height: 100%; background: var(--primary); border-radius: var(--radius-full); }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <header class="header">
+        <div class="brand">
+            <i data-lucide="incognito" class="brand-icon"></i>
+            <span class="brand-title">Shopify SpyKit</span>
+            <span class="badge-pro"><i data-lucide="star" style="width: 12px; height: 12px;"></i> Pro</span>
+        </div>
+        <div class="header-actions">
+            <i data-lucide="settings"></i>
+            <i data-lucide="moon"></i>
+            <i data-lucide="more-vertical"></i>
+        </div>
+    </header>
+
+    <nav class="nav-tabs">
+        <div class="tab active"><i data-lucide="home"></i> Store</div>
+        <div class="tab"><i data-lucide="palette"></i> Theme</div>
+        <div class="tab"><i data-lucide="grid-2x2"></i> Apps</div>
+        <div class="tab"><i data-lucide="box"></i> Scraper</div>
+        <div class="tab"><i data-lucide="download"></i> Downloads</div>
+        <div class="tab"><i data-lucide="file-output"></i> Export</div>
+    </nav>
+
+    <main class="content">
+        
+        <div class="card store-top-card">
+            <div class="store-main-info">
+                <div class="store-identity">
+                    <div class="store-logo">S</div>
+                    <div class="store-details">
+                        <div class="store-title-row">
+                            <h2>Gifts With Humanity</h2>
+                            <span class="badge-active"><span class="dot"></span> Active</span>
+                        </div>
+                        <div class="store-links">
+                            <a href="#">aedev.myshopify.com <i data-lucide="arrow-up-right" style="width: 14px;"></i></a>
+                            <span class="store-email">support@giftswithhumanity.com <i data-lucide="copy" style="width: 14px; cursor: pointer;"></i></span>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn">View Report <i data-lucide="arrow-right" style="width: 16px;"></i></button>
+            </div>
+
+            <div class="store-stats-row">
+                <div class="stat-box">
+                    <div class="stat-header"><i data-lucide="palette" class="stat-icon purple"></i> Theme</div>
+                    <div class="stat-value">Dawn</div>
+                    <div class="stat-link">Details ></div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-header"><i data-lucide="puzzle" class="stat-icon blue"></i> Apps</div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-link">View ></div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-header"><i data-lucide="package" class="stat-icon green"></i> Products</div>
+                    <div class="stat-value">1,268</div>
+                    <div class="stat-link">View ></div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-header"><i data-lucide="folder" class="stat-icon orange"></i> Collections</div>
+                    <div class="stat-value">118</div>
+                    <div class="stat-link">View ></div>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="section-title">Store Intelligence</h3>
+        
+        <div class="intelligence-grid">
+            
+            <div class="intel-card col-3">
+                <div class="intel-header"><div class="icon purple"><i data-lucide="map-pin"></i></div> Location</div>
+                <div class="intel-value">Warrensville Heights</div>
+                <div class="intel-sub">Ohio, US <span class="flag">🇺🇸</span></div>
+            </div>
+
+            <div class="intel-card col-3">
+                <div class="intel-header"><div class="icon green"><i data-lucide="dollar-sign"></i></div> Currency</div>
+                <div class="intel-value">USD</div>
+                <div class="intel-sub">- $</div>
+            </div>
+
+            <div class="intel-card col-3">
+                <div class="intel-header"><div class="icon blue"><i data-lucide="globe"></i></div> Ships To</div>
+                <div class="intel-sub" style="margin-top: 4px; gap: 12px;">
+                    <span style="display: flex; align-items: center; gap: 4px; background: var(--bg-body); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-dark); font-weight: 500; color: var(--text-main);"><span class="flag">🇺🇸</span> US</span>
+                    <span style="display: flex; align-items: center; gap: 4px; background: var(--bg-body); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-dark); font-weight: 500; color: var(--text-main);"><span class="flag">🇨🇦</span> CA</span>
+                </div>
+            </div>
+
+            <div class="intel-card col-3">
+                <div class="intel-header" style="margin-bottom: 4px;">Social Media</div>
+                <div class="social-icons-container">
+                    <div class="social-icon" title="Facebook"><i data-lucide="facebook"></i></div>
+                    <div class="social-icon" title="Instagram"><i data-lucide="instagram"></i></div>
+                    <div class="social-icon" title="Pinterest"><i data-lucide="camera"></i></div> <div class="social-icon" title="TikTok"><i data-lucide="music-2"></i></div>
+                    <div class="social-icon" title="YouTube"><i data-lucide="youtube"></i></div>
+                    <div class="social-icon" title="X (Twitter)"><i data-lucide="twitter"></i></div>
+                    <div class="social-icon" title="Email"><i data-lucide="mail"></i></div>
+                    <div class="social-icon" title="LinkedIn"><i data-lucide="linkedin"></i></div>
+                </div>
+            </div>
+
+            <div class="intel-card col-4">
+                <div class="intel-header"><div class="icon orange"><i data-lucide="file-text"></i></div> About</div>
+                <div class="intel-sub" style="line-height: 1.5;">
+                    Fair Trade Gifts - Unique Gift Ideas for all Occasions from 20 countries and 40 Fair trade artisan producer partners. Wholesale available.
+                </div>
+            </div>
+
+            <div class="intel-card col-5">
+                <div class="intel-header"><div class="icon purple"><i data-lucide="credit-card"></i></div> Payment Methods</div>
+                <div class="payment-methods">
+                    <div class="pay-badge visa">VISA</div>
+                    <div class="pay-badge mc">
+                        <div class="mc-circle mc-red"></div>
+                        <div class="mc-circle mc-orange"></div>
+                    </div>
+                    <div class="pay-badge amex">AMEX</div>
+                    <div class="pay-badge discover">DISCOVER</div>
+                    <div class="pay-badge diners"><i data-lucide="compass" style="width: 12px;"></i></div>
+                </div>
+                <div class="shop-pay-row">
+                    Shop Pay Installments 
+                    <span class="status-badge"><i data-lucide="check" style="width: 10px;"></i> Enabled</span>
+                </div>
+            </div>
+
+            <div class="intel-card col-3">
+                <div class="intel-header"><div class="icon gray"><i data-lucide="clock"></i></div> Estimated Age</div>
+                <div class="intel-sub" style="margin-bottom: 4px;">First product published</div>
+                <div class="intel-value">646 days ago</div>
+                <div class="intel-sub">(07/18/2023, 10:15 AM)</div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="footer">
+        <div class="footer-left">
+            <i data-lucide="shield-check" class="shield-icon"></i>
+            <div class="footer-text">
+                <p>Minimal permissions.</p>
+                <p>Your data stays private.</p>
+            </div>
+        </div>
+        <div class="footer-right">
+            <div class="sync-info">
+                <div class="sync-text">100 free syncs left <i data-lucide="info" style="width: 14px; color: var(--text-light);"></i></div>
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+            </div>
+            <button class="btn btn-primary"><i data-lucide="star" style="width: 16px;"></i> Upgrade</button>
+        </div>
+    </footer>
+</div>
+
+<script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+</script>
+
+</body>
+</html>

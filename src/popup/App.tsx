@@ -124,7 +124,7 @@ export default function App() {
         }}
       />
       <main className="content">
-        <div className={`view${settings.activeTab === 'overview' ? ' active' : ''}`}>
+        <div className={`view${settings.activeTab === 'stores' ? ' active' : ''}`}>
           <OverviewPage
             storeInfo={storeInfo}
             onNavigate={(p, opts) => {

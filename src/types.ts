@@ -82,6 +82,14 @@ export interface ShopMetaJson {
   offers_shop_pay_installments?: boolean
 }
 
+/** Social links + emails scraped from the store's storefront DOM. */
+export interface StoreContacts {
+  /** Map of platform name → href, e.g. `{ instagram: 'https://instagram.com/...' }` */
+  social: Record<string, string>
+  /** Unique contact emails found in mailto links / visible text */
+  emails: string[]
+}
+
 /** Popup `window.storeData` — mirror of persisted store + raw theme. */
 export interface SpyKitStoreData {
   /** Exact JSON clone of `window.Shopify.theme` from the storefront (same as persisted `shopifyThemeRaw`). */
@@ -106,15 +114,17 @@ export interface SpyKitStoreData {
   catalogFullDataInIndexedDb: boolean
   /** Full JSON from `{origin}/meta.json` (content script). */
   shopMeta: ShopMetaJson | null
-  /** Display name; prefer `shopMeta.name`, else author meta / legacy */
+  /** Display name from `shopMeta.name` (`/meta.json`); empty until meta loads */
   storeName: string
+  /** Social links + emails scraped from the store's storefront DOM by the content script. */
+  storeContacts: StoreContacts | null
 }
 
 export interface StoreInfo {
   domain: string
   /** Full JSON from `{origin}/meta.json` — primary source for store display name (`name`). */
   shopMeta?: ShopMetaJson | null
-  /** Merchant display name; background sets from `shopMeta.name` when available. */
+  /** Merchant display name from `shopMeta.name` only (set in background). */
   storeName?: string
   theme: ShopifyTheme | null
   apps: ShopifyApp[]
@@ -131,9 +141,11 @@ export interface StoreInfo {
   collectionsSample?: CatalogCollectionRow[]
   /** Last catalog sync wrote full API payloads to IndexedDB. */
   catalogFullDataInIndexedDb?: boolean
+  /** Social links + emails scraped from the store's storefront DOM. */
+  storeContacts?: StoreContacts
 }
 
-export type PopupPageId = 'overview' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
+export type PopupPageId = 'stores' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
 
 /**
  * Single persisted blob for all popup UI preferences.
@@ -198,8 +210,6 @@ export interface MsgPageData {
     shopifyThemeRaw?: Record<string, unknown> | null
     productsSample?: ProductSlim[]
     collectionsSample?: CollectionSlim[]
-    /** `<meta name="author" content="…">` — read in content script, merged here */
-    storeName?: string
   }
 }
 
@@ -210,6 +220,16 @@ export interface MsgShopMeta {
   payload: {
     domain: string
     shopMeta: ShopMetaJson
+  }
+}
+
+/** Content script collected social links + emails from the storefront DOM. */
+export interface MsgStoreContacts {
+  type: 'STORE_CONTACTS'
+  from: 'content'
+  payload: {
+    domain: string
+    contacts: StoreContacts
   }
 }
 
@@ -282,6 +302,7 @@ export type ExtMessage =
   | MsgStoreDetected
   | MsgPageData
   | MsgShopMeta
+  | MsgStoreContacts
   | MsgGetStoreInfo
   | MsgSyncCatalogOnPopup
   | MsgGetIdbCatalog

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 
 export type PageId =
-  | 'overview'
+  | 'stores'
   | 'theme'
   | 'apps'
   | 'scraper'
@@ -22,7 +22,7 @@ interface NavProps {
 }
 
 const navItems: Array<{ id: PageId; label: string; Icon: typeof Home }> = [
-  { id: 'overview', label: 'Overview', Icon: Home },
+  { id: 'stores', label: 'Stores', Icon: Home },
   { id: 'theme', label: 'Theme', Icon: Palette },
   { id: 'apps', label: 'Apps', Icon: Grid2x2 },
   { id: 'scraper', label: 'Products', Icon: Package },

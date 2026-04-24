@@ -370,7 +370,6 @@ chrome.runtime.onMessage.addListener(
         productCount: pc,
         collectionCount: cc,
         shopifyThemeRaw: rawThemeObj,
-        storeName: storeNamePayload,
       } = msg.payload
       storageGet(['storeInfo']).then(async ({ storeInfo }) => {
         const theme = normalizeThemePayload(themeRaw)
@@ -396,11 +395,7 @@ chrome.runtime.onMessage.addListener(
         const shopMetaKept = storeInfo?.shopMeta ?? undefined
         const nameFromShopMeta =
           shopMetaKept && typeof shopMetaKept.name === 'string' ? shopMetaKept.name.trim() : ''
-        let storeName = storeInfo?.storeName
-        if (nameFromShopMeta) storeName = nameFromShopMeta
-        else if (typeof storeNamePayload === 'string' && storeNamePayload.trim()) {
-          storeName = storeNamePayload.trim()
-        }
+        const storeName = nameFromShopMeta || storeInfo?.storeName
 
         const info: StoreInfo = {
           domain,
@@ -450,6 +445,34 @@ chrome.runtime.onMessage.addListener(
         }
         await storageSet({ storeInfo: info })
         log('Stored shop meta.json for', domain, { name: info.storeName })
+      })
+    }
+
+    if (msg.type === 'STORE_CONTACTS') {
+      const { domain: contactsDomain, contacts } = msg.payload
+      storageGet(['storeInfo']).then(async ({ storeInfo }) => {
+        const domain = contactsDomain || storeInfo?.domain || ''
+        const info: StoreInfo = {
+          domain,
+          theme: storeInfo?.theme ?? null,
+          apps: storeInfo?.apps ?? [],
+          productCount: storeInfo?.productCount ?? 0,
+          collectionCount: storeInfo?.collectionCount ?? 0,
+          catalogLoading: storeInfo?.catalogLoading,
+          shopifyThemeRaw: storeInfo?.shopifyThemeRaw ?? null,
+          productsSample: storeInfo?.productsSample,
+          collectionsSample: storeInfo?.collectionsSample,
+          catalogFullDataInIndexedDb: storeInfo?.catalogFullDataInIndexedDb ?? false,
+          shopMeta: storeInfo?.shopMeta,
+          storeName: storeInfo?.storeName,
+          storeContacts: contacts,
+          detectedAt: storeInfo?.detectedAt ?? Date.now(),
+        }
+        await storageSet({ storeInfo: info })
+        log('Stored store contacts for', domain, {
+          emails: contacts.emails.length,
+          socials: Object.keys(contacts.social).length,
+        })
       })
     }
 
@@ -519,7 +542,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     const defaultPopupSettings: PopupSettings = {
       settingsVersion: 1,
       theme: 'light',
-      activeTab: 'overview',
+      activeTab: 'stores',
       scrollY: 0,
       scraperView: 'products',
       scraperPage: 1,

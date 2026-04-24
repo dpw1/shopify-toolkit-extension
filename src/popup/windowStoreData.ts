@@ -22,9 +22,7 @@ export function syncPopupStoreData(storeInfo: StoreInfo | null): void {
         domain: storeInfo.domain,
         shopMeta: storeInfo.shopMeta ?? null,
         storeName:
-          (typeof storeInfo.shopMeta?.name === 'string' && storeInfo.shopMeta.name.trim()) ||
-          storeInfo.storeName?.trim() ||
-          '',
+          (typeof storeInfo.shopMeta?.name === 'string' && storeInfo.shopMeta.name.trim()) || '',
         productCount: storeInfo.productCount,
         collectionCount: storeInfo.collectionCount,
         catalogLoading: storeInfo.catalogLoading ?? false,
@@ -32,6 +30,7 @@ export function syncPopupStoreData(storeInfo: StoreInfo | null): void {
         products: storeInfo.productsSample ?? [],
         collections: storeInfo.collectionsSample ?? [],
         catalogFullDataInIndexedDb: storeInfo.catalogFullDataInIndexedDb ?? false,
+        storeContacts: storeInfo.storeContacts ?? null,
       }
     : {
         theme: null,
@@ -49,6 +48,7 @@ export function syncPopupStoreData(storeInfo: StoreInfo | null): void {
         products: [],
         collections: [],
         catalogFullDataInIndexedDb: false,
+        storeContacts: null,
       }
 
   window.storeData = data

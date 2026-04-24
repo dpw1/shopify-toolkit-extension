@@ -10,16 +10,19 @@ export const POPUP_SETTINGS_VERSION = 1
 
 const LOCAL_FALLBACK_KEY = 'spykit-popup-settings'
 
-const VALID_PAGES: PopupPageId[] = ['overview', 'theme', 'apps', 'scraper', 'downloads', 'export']
+const VALID_PAGES: PopupPageId[] = ['stores', 'theme', 'apps', 'scraper', 'downloads', 'export']
 
-function isValidPage(v: unknown): v is PopupPageId {
-  return typeof v === 'string' && (VALID_PAGES as string[]).includes(v)
+/** Persisted tab id was renamed from `overview` → `stores`. */
+function normalizeActiveTabId(v: unknown): PopupPageId | undefined {
+  if (typeof v !== 'string') return undefined
+  const id = v === 'overview' ? 'stores' : v
+  return (VALID_PAGES as string[]).includes(id) ? (id as PopupPageId) : undefined
 }
 
 export const DEFAULT_POPUP_SETTINGS: PopupSettings = {
   settingsVersion: POPUP_SETTINGS_VERSION,
   theme: 'light',
-  activeTab: 'overview',
+  activeTab: 'stores',
   scrollY: 0,
   scraperView: 'products',
   scraperPage: 1,
@@ -40,7 +43,8 @@ function normalizePartial(raw: unknown): Partial<PopupSettings> {
     out.settingsVersion = Math.floor(o.settingsVersion)
   }
   if (o.theme === 'light' || o.theme === 'dark') out.theme = o.theme
-  if (isValidPage(o.activeTab)) out.activeTab = o.activeTab
+  const tab = normalizeActiveTabId(o.activeTab)
+  if (tab) out.activeTab = tab
   if (typeof o.scrollY === 'number' && o.scrollY >= 0) out.scrollY = Math.floor(o.scrollY)
   if (o.scraperView === 'products' || o.scraperView === 'collections') out.scraperView = o.scraperView
   if (typeof o.scraperPage === 'number' && o.scraperPage >= 1) out.scraperPage = Math.floor(o.scraperPage)
@@ -66,12 +70,14 @@ function normalizePartial(raw: unknown): Partial<PopupSettings> {
 function migrateLegacy(result: Record<string, unknown>): Partial<PopupSettings> {
   const out: Partial<PopupSettings> = {}
   if (result.theme === 'light' || result.theme === 'dark') out.theme = result.theme
-  if (isValidPage(result.activeTab)) out.activeTab = result.activeTab as PopupPageId
+  const legacyTab = normalizeActiveTabId(result.activeTab)
+  if (legacyTab) out.activeTab = legacyTab
   if (typeof result.scrollY === 'number' && result.scrollY >= 0) out.scrollY = Math.floor(result.scrollY)
 
   const vs = result.popupViewState as PopupViewState | undefined
   if (vs && typeof vs === 'object') {
-    if (isValidPage(vs.activePage)) out.activeTab = vs.activePage
+    const vsTab = normalizeActiveTabId(vs.activePage)
+    if (vsTab) out.activeTab = vsTab
     if (vs.scraperView === 'products' || vs.scraperView === 'collections') out.scraperView = vs.scraperView
     if (typeof vs.scraperPage === 'number' && vs.scraperPage >= 1) out.scraperPage = Math.floor(vs.scraperPage)
     if (typeof vs.scraperSearch === 'string') out.scraperSearch = vs.scraperSearch
