@@ -9,7 +9,7 @@
  *     and relay them to the background service worker.
  */
 
-import type { ExtMessage } from '../types'
+import type { ExtMessage, MsgPageData, ShopMetaJson } from '../types'
 
 declare const __APP_MODE__: string
 const IS_DEV = __APP_MODE__ === 'development'
@@ -36,6 +36,34 @@ function isShopify(): boolean {
 
 // ─── Page-world injection ────────────────────────────────────────────────────
 
+/** Same as storefront: `<meta name="author" content="…">` (name matching is case-insensitive). */
+function readStoreNameFromAuthorMeta(): string | undefined {
+  for (const el of document.querySelectorAll('meta[name]')) {
+    const name = el.getAttribute('name')
+    if (!name || name.toLowerCase() !== 'author') continue
+    const c = el.getAttribute('content')?.trim()
+    if (c && c.length > 0) return c
+  }
+  return undefined
+}
+
+/** Shopify exposes shop metadata at the storefront root: `/meta.json`. */
+async function fetchAndSendShopMeta(): Promise<void> {
+  try {
+    const url = new URL('/meta.json', location.href).href
+    const res = await fetch(url, { credentials: 'same-origin' })
+    if (!res.ok) return
+    const shopMeta = (await res.json()) as ShopMetaJson
+    chrome.runtime.sendMessage({
+      type: 'SHOP_META',
+      from: 'content',
+      payload: { domain: location.hostname, shopMeta },
+    } satisfies ExtMessage)
+  } catch {
+    /* non-Shopify theme, offline, CORS edge, etc. */
+  }
+}
+
 function injectPageWorld() {
   const script = document.createElement('script')
   // Built as rollup input `page-world` → assets/page-world.js
@@ -61,6 +89,36 @@ window.addEventListener('message', (event) => {
 
   const msg = event.data as ExtMessage
   log('Relay from page world:', msg.type)
+
+  if (msg.type === 'PAGE_DATA') {
+    const m = msg as MsgPageData
+    const p = m.payload
+    // Re-read from this isolated world (same DOM as the page). Do not spread `event.data` — it
+    // includes `__spykit`, which can confuse some paths; send a clean MV3 message.
+    const storeNameFromContent = readStoreNameFromAuthorMeta()
+    const storeName =
+      storeNameFromContent ??
+      (typeof p.storeName === 'string' && p.storeName.trim() ? p.storeName.trim() : undefined)
+
+    chrome.runtime.sendMessage({
+      type: 'PAGE_DATA',
+      from: 'content',
+      payload: {
+        domain: p.domain,
+        theme: p.theme,
+        apps: p.apps,
+        productCount: p.productCount,
+        collectionCount: p.collectionCount,
+        catalogLoading: p.catalogLoading,
+        shopifyThemeRaw: p.shopifyThemeRaw,
+        productsSample: p.productsSample,
+        collectionsSample: p.collectionsSample,
+        ...(storeName != null ? { storeName } : {}),
+      },
+    } satisfies ExtMessage)
+    return
+  }
+
   chrome.runtime.sendMessage(msg)
 })
 
@@ -83,6 +141,7 @@ function init() {
   } satisfies ExtMessage)
 
   injectPageWorld()
+  void fetchAndSendShopMeta()
 }
 
 if (document.readyState === 'loading') {

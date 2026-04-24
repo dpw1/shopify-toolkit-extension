@@ -9,16 +9,17 @@ import {
   FileSpreadsheet,
   Folder,
   Package,
-  Palette,
   Puzzle,
   ShoppingBag,
+  Store,
   Table,
   Tag,
 } from 'lucide-react'
 
 interface OverviewPageProps {
   storeInfo: StoreInfo | null
-  onNavigate: (page: PageId) => void
+  /** Pass `scraperView` when opening the Products tab so the correct sub-view (products vs collections) shows. */
+  onNavigate: (page: PageId, options?: { scraperView?: 'products' | 'collections' }) => void
 }
 
 function fmt(n: number) {
@@ -44,6 +45,10 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
       : 'Theme and catalog counts load after the page reports data.'
 
   const catalogBusy = storeInfo?.catalogLoading === true
+  const displayStoreName =
+    (typeof storeInfo?.shopMeta?.name === 'string' && storeInfo.shopMeta.name.trim()) ||
+    storeInfo?.storeName?.trim() ||
+    ''
 
   return (
     <>
@@ -92,20 +97,20 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
             onKeyDown={keyActivate(() => onNavigate('theme'))}
           >
             <div className="stat-header">
-              <Palette
+              <Store
                 className="stat-icon"
                 style={{ color: 'var(--primary)', background: 'var(--primary-light)' }}
                 strokeWidth={2}
               />
-              Theme
+              Store name
             </div>
             <div className="stat-value flex-center">
-              {t?.name ?? '—'}
-              {t?.name ? (
+              {displayStoreName || '—'}
+              {displayStoreName ? (
                 <CheckCircle2 size={16} color="var(--success)" strokeWidth={2} aria-hidden />
               ) : null}
             </div>
-            <div className="stat-link">Details &gt;</div>
+            <div className="stat-link">Theme details &gt;</div>
           </div>
           <div
             role="button"
@@ -129,8 +134,8 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
             role="button"
             tabIndex={0}
             className="stat-card"
-            onClick={() => onNavigate('scraper')}
-            onKeyDown={keyActivate(() => onNavigate('scraper'))}
+            onClick={() => onNavigate('scraper', { scraperView: 'products' })}
+            onKeyDown={keyActivate(() => onNavigate('scraper', { scraperView: 'products' }))}
           >
             <div className="stat-header">
               <Package
@@ -149,8 +154,8 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
             role="button"
             tabIndex={0}
             className="stat-card"
-            onClick={() => onNavigate('scraper')}
-            onKeyDown={keyActivate(() => onNavigate('scraper'))}
+            onClick={() => onNavigate('scraper', { scraperView: 'collections' })}
+            onKeyDown={keyActivate(() => onNavigate('scraper', { scraperView: 'collections' }))}
           >
             <div className="stat-header">
               <Folder
@@ -174,8 +179,8 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
           role="button"
           tabIndex={0}
           className="action-card"
-          onClick={() => onNavigate('scraper')}
-          onKeyDown={keyActivate(() => onNavigate('scraper'))}
+          onClick={() => onNavigate('scraper', { scraperView: 'products' })}
+          onKeyDown={keyActivate(() => onNavigate('scraper', { scraperView: 'products' }))}
         >
           <Package className="action-icon purple" size={20} strokeWidth={2} aria-hidden />
           <div className="action-text">
@@ -190,8 +195,8 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
           role="button"
           tabIndex={0}
           className="action-card"
-          onClick={() => onNavigate('scraper')}
-          onKeyDown={keyActivate(() => onNavigate('scraper'))}
+          onClick={() => onNavigate('scraper', { scraperView: 'collections' })}
+          onKeyDown={keyActivate(() => onNavigate('scraper', { scraperView: 'collections' }))}
         >
           <Folder className="action-icon orange" size={20} strokeWidth={2} aria-hidden />
           <div className="action-text">

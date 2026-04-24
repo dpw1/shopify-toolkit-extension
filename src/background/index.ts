@@ -16,6 +16,7 @@ import type {
   CatalogCollectionRow,
   CatalogProductRow,
   ExtMessage,
+  PopupSettings,
   ShopifyApp,
   ShopifyTheme,
   StoreInfo,
@@ -192,6 +193,8 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
   for (const col of collectionsSample) {
     const handle = String(col.handle ?? '')
     if (!handle) continue
+    const productsCount = Number((col as { products_count?: unknown }).products_count ?? 0)
+    if (!Number.isFinite(productsCount) || productsCount < 1) continue
     let pPage = 1
     while (true) {
       const url = `${origin}/collections/${handle}/products.json?limit=250&page=${pPage}`
@@ -247,6 +250,8 @@ async function syncCatalogFromActiveTab(): Promise<void> {
 
   const loading: StoreInfo = {
     domain: storeInfo?.domain ?? domainHostname,
+    storeName: storeInfo?.storeName,
+    shopMeta: storeInfo?.shopMeta,
     theme: storeInfo?.theme ?? null,
     apps: storeInfo?.apps ?? [],
     productCount: storeInfo?.productCount ?? 0,
@@ -365,6 +370,7 @@ chrome.runtime.onMessage.addListener(
         productCount: pc,
         collectionCount: cc,
         shopifyThemeRaw: rawThemeObj,
+        storeName: storeNamePayload,
       } = msg.payload
       storageGet(['storeInfo']).then(async ({ storeInfo }) => {
         const theme = normalizeThemePayload(themeRaw)
@@ -387,8 +393,18 @@ chrome.runtime.onMessage.addListener(
         let catalogFullDataInIndexedDb = storeInfo?.catalogFullDataInIndexedDb ?? false
         if (Array.isArray(productsSample) && productsSample.length > 0) catalogFullDataInIndexedDb = true
 
+        const shopMetaKept = storeInfo?.shopMeta ?? undefined
+        const nameFromShopMeta =
+          shopMetaKept && typeof shopMetaKept.name === 'string' ? shopMetaKept.name.trim() : ''
+        let storeName = storeInfo?.storeName
+        if (nameFromShopMeta) storeName = nameFromShopMeta
+        else if (typeof storeNamePayload === 'string' && storeNamePayload.trim()) {
+          storeName = storeNamePayload.trim()
+        }
+
         const info: StoreInfo = {
           domain,
+          storeName,
           theme,
           apps: apps as ShopifyApp[],
           productCount,
@@ -398,6 +414,7 @@ chrome.runtime.onMessage.addListener(
           productsSample,
           collectionsSample,
           catalogFullDataInIndexedDb,
+          shopMeta: shopMetaKept,
           detectedAt: Date.now(),
         }
         await storageSet({ storeInfo: info })
@@ -407,6 +424,32 @@ chrome.runtime.onMessage.addListener(
           theme: theme?.name,
           catalogLoading: info.catalogLoading,
         })
+      })
+    }
+
+    if (msg.type === 'SHOP_META') {
+      const { domain: metaDomain, shopMeta } = msg.payload
+      storageGet(['storeInfo']).then(async ({ storeInfo }) => {
+        const domain = metaDomain || storeInfo?.domain || ''
+        const nameFromJson =
+          shopMeta && typeof shopMeta.name === 'string' ? shopMeta.name.trim() : ''
+        const info: StoreInfo = {
+          domain,
+          theme: storeInfo?.theme ?? null,
+          apps: storeInfo?.apps ?? [],
+          productCount: storeInfo?.productCount ?? 0,
+          collectionCount: storeInfo?.collectionCount ?? 0,
+          catalogLoading: storeInfo?.catalogLoading,
+          shopifyThemeRaw: storeInfo?.shopifyThemeRaw ?? null,
+          productsSample: storeInfo?.productsSample,
+          collectionsSample: storeInfo?.collectionsSample,
+          catalogFullDataInIndexedDb: storeInfo?.catalogFullDataInIndexedDb ?? false,
+          shopMeta,
+          storeName: nameFromJson || storeInfo?.storeName,
+          detectedAt: Date.now(),
+        }
+        await storageSet({ storeInfo: info })
+        log('Stored shop meta.json for', domain, { name: info.storeName })
       })
     }
 
@@ -473,7 +516,28 @@ chrome.runtime.onMessage.addListener(
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   log(`onInstalled: ${reason} — v${__APP_VERSION__}`)
   if (reason === 'install') {
-    storageSet({ syncCount: 100, isPro: false, theme: 'light' })
+    const defaultPopupSettings: PopupSettings = {
+      settingsVersion: 1,
+      theme: 'light',
+      activeTab: 'overview',
+      scrollY: 0,
+      scraperView: 'products',
+      scraperPage: 1,
+      scraperSearch: '',
+      scraperStockFilter: 'all',
+      scraperVendorFilters: [],
+      scraperTypeFilters: [],
+      scraperCatalogFilters: [],
+      scraperPerPage: 10,
+    }
+    void storageGet(['popupSettings']).then(({ popupSettings }) => {
+      void storageSet({
+        syncCount: 100,
+        isPro: false,
+        theme: 'light',
+        popupSettings: popupSettings ?? defaultPopupSettings,
+      })
+    })
   }
 })
 

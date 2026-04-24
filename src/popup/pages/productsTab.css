@@ -42,6 +42,16 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.products-tab .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .products-tab .search-box {
@@ -176,7 +186,7 @@
   background: var(--bg-hover);
   padding: 4px;
   border-radius: var(--radius-lg);
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 .products-tab .sub-nav-item {
@@ -206,12 +216,14 @@
 .products-tab .table-card {
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--bg-card);
 }
 
 .products-tab .products-table {
   width: 100%;
+  min-width: 960px;
   border-collapse: collapse;
 }
 
@@ -418,11 +430,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 .products-tab .page-controls .page-btn,
 .products-tab .per-page-select .pt-page-btn {
   width: 32px;
+  min-width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
@@ -435,6 +449,10 @@
   font-size: var(--text-sm);
   font-family: inherit;
   padding: 0;
+  /* fixed size so layout never shifts when page numbers change width */
+  flex-shrink: 0;
+  flex-grow: 0;
+  box-sizing: border-box;
 }
 .products-tab .page-controls .page-btn:hover:not(:disabled) {
   color: var(--text-main);
@@ -735,6 +753,22 @@
   padding-top: 4px;
 }
 
+/* Row enter animation */
+@keyframes pt-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.products-tab .pt-data-row {
+  animation: pt-row-in 0.2s ease both;
+}
+
 /* Empty / loading */
 .products-tab .pt-empty {
   text-align: center;
@@ -1002,6 +1036,119 @@
 }
 .products-tab .filter-full-select:focus {
   border-color: var(--primary);
+}
+
+.products-tab .filter-multi {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.products-tab .filter-multi-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.products-tab .filter-multi[open] .filter-multi-summary {
+  color: var(--text-main);
+}
+
+.products-tab .filter-multi-summary::-webkit-details-marker {
+  display: none;
+}
+
+.products-tab .filter-multi-summary::after {
+  content: '▾';
+  color: var(--text-light);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.products-tab .filter-multi[open] .filter-multi-summary::after {
+  transform: rotate(180deg);
+}
+
+.products-tab .filter-multi-list {
+  border-top: 1px solid var(--border-color);
+  max-height: 184px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--bg-card);
+}
+
+.products-tab .filter-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.products-tab .filter-check-row:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.products-tab .filter-check-row input {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-dark);
+  border-radius: 4px;
+  background: var(--bg-card);
+  margin: 0;
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.products-tab .filter-check-row input:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.products-tab .filter-check-row input:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.products-tab .filter-check-row input:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 1px;
+}
+
+.products-tab .filter-check-row span {
+  line-height: 1.35;
+}
+
+.products-tab .filter-check-row.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.products-tab .filter-check-row.is-disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
 }
 
 /* page-btn disabled state */

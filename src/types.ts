@@ -59,6 +59,29 @@ export interface CollectionSlim {
 export type CatalogProductRow = Record<string, unknown> & { id: number }
 export type CatalogCollectionRow = Record<string, unknown> & { id: number }
 
+/**
+ * Shopify storefront `GET /meta.json` (same origin as the live shop).
+ * @see https://shopify.dev/docs/api/ajax/reference/meta
+ */
+export interface ShopMetaJson {
+  id?: number
+  name?: string
+  city?: string
+  province?: string
+  country?: string
+  currency?: string
+  domain?: string
+  url?: string
+  myshopify_domain?: string
+  description?: string
+  ships_to_countries?: string[]
+  money_format?: string
+  published_collections_count?: number
+  published_products_count?: number
+  shopify_pay_enabled_card_brands?: string[]
+  offers_shop_pay_installments?: boolean
+}
+
 /** Popup `window.storeData` — mirror of persisted store + raw theme. */
 export interface SpyKitStoreData {
   /** Exact JSON clone of `window.Shopify.theme` from the storefront (same as persisted `shopifyThemeRaw`). */
@@ -81,10 +104,18 @@ export interface SpyKitStoreData {
   collections: CatalogCollectionRow[]
   /** Full storefront `products.json` / `collections.json` rows are in IndexedDB when true */
   catalogFullDataInIndexedDb: boolean
+  /** Full JSON from `{origin}/meta.json` (content script). */
+  shopMeta: ShopMetaJson | null
+  /** Display name; prefer `shopMeta.name`, else author meta / legacy */
+  storeName: string
 }
 
 export interface StoreInfo {
   domain: string
+  /** Full JSON from `{origin}/meta.json` — primary source for store display name (`name`). */
+  shopMeta?: ShopMetaJson | null
+  /** Merchant display name; background sets from `shopMeta.name` when available. */
+  storeName?: string
   theme: ShopifyTheme | null
   apps: ShopifyApp[]
   productCount: number
@@ -100,6 +131,41 @@ export interface StoreInfo {
   collectionsSample?: CatalogCollectionRow[]
   /** Last catalog sync wrote full API payloads to IndexedDB. */
   catalogFullDataInIndexedDb?: boolean
+}
+
+export type PopupPageId = 'overview' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
+
+/**
+ * Single persisted blob for all popup UI preferences.
+ * Bump `settingsVersion` when adding fields so migrations can normalize old storage.
+ */
+export interface PopupSettings {
+  settingsVersion: number
+  theme: 'light' | 'dark'
+  activeTab: PopupPageId
+  scrollY: number
+  scraperView: 'products' | 'collections'
+  scraperPage: number
+  scraperSearch: string
+  scraperStockFilter: 'all' | 'in' | 'out'
+  scraperVendorFilters: string[]
+  scraperTypeFilters: string[]
+  scraperCatalogFilters: string[]
+  scraperPerPage: 10 | 25 | 50
+}
+
+/** @deprecated Legacy shape — read only for migration into `popupSettings`. */
+export interface PopupViewState {
+  activePage: PopupPageId
+  scraperView?: 'products' | 'collections'
+  scraperPage?: number
+  scraperSearch?: string
+  scraperStockFilter?: 'all' | 'in' | 'out'
+  scraperVendorFilters?: string[]
+  scraperTypeFilters?: string[]
+  scraperCatalogFilters?: string[]
+  scraperPerPage?: 10 | 25 | 50
+  scrollY?: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +198,18 @@ export interface MsgPageData {
     shopifyThemeRaw?: Record<string, unknown> | null
     productsSample?: ProductSlim[]
     collectionsSample?: CollectionSlim[]
+    /** `<meta name="author" content="…">` — read in content script, merged here */
+    storeName?: string
+  }
+}
+
+/** Content script fetched `{origin}/meta.json` (Shopify shop object). */
+export interface MsgShopMeta {
+  type: 'SHOP_META'
+  from: 'content'
+  payload: {
+    domain: string
+    shopMeta: ShopMetaJson
   }
 }
 
@@ -203,6 +281,7 @@ export interface MsgCatalogIdbResponse {
 export type ExtMessage =
   | MsgStoreDetected
   | MsgPageData
+  | MsgShopMeta
   | MsgGetStoreInfo
   | MsgSyncCatalogOnPopup
   | MsgGetIdbCatalog
@@ -219,8 +298,11 @@ export type ExtMessage =
 // ─────────────────────────────────────────────────────────────────────────────
 export interface StorageSchema {
   storeInfo: StoreInfo | null
+  /** UI theme — mirrored from `popupSettings.theme` for background / older code paths */
   theme: 'light' | 'dark'
   syncCount: number
   isPro: boolean
   lastSyncAt: number | null
+  /** All popup UI state (tabs, products tab, scroll, theme mirror) */
+  popupSettings: PopupSettings | null
 }

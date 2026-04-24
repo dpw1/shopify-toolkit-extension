@@ -18,10 +18,18 @@ export function useStoreInfo() {
           if (chrome.runtime.lastError) return
           if (res?.type === 'STORE_INFO_RESPONSE') {
             setStoreInfo(res.payload)
+            const hasCatalog =
+              Array.isArray(res.payload?.productsSample) && res.payload.productsSample.length > 0
+            // Use cached storeInfo/window.storeData by default.
+            // Only fetch when no catalog exists yet.
+            if (!hasCatalog) {
+              chrome.runtime.sendMessage(
+                { type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage,
+              )
+            }
           }
         },
       )
-      chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
     } catch {
       /* not running as extension */
     }

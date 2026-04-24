@@ -20,6 +20,11 @@ export function syncPopupStoreData(storeInfo: StoreInfo | null): void {
         themeNormalized: tn,
         apps: storeInfo.apps ?? [],
         domain: storeInfo.domain,
+        shopMeta: storeInfo.shopMeta ?? null,
+        storeName:
+          (typeof storeInfo.shopMeta?.name === 'string' && storeInfo.shopMeta.name.trim()) ||
+          storeInfo.storeName?.trim() ||
+          '',
         productCount: storeInfo.productCount,
         collectionCount: storeInfo.collectionCount,
         catalogLoading: storeInfo.catalogLoading ?? false,
@@ -36,6 +41,8 @@ export function syncPopupStoreData(storeInfo: StoreInfo | null): void {
         themeNormalized: null,
         apps: [],
         domain: '',
+        shopMeta: null,
+        storeName: '',
         productCount: 0,
         collectionCount: 0,
         catalogLoading: false,

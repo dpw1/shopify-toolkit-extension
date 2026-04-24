@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CatalogCollectionRow, CatalogProductRow, ExtMessage, StoreInfo } from '../../types'
-import { Search, Package, Folder, ChevronLeft, ChevronRight, Link2, RefreshCw, X } from 'lucide-react'
+import { Search, Package, Folder, Link2, RefreshCw, X } from 'lucide-react'
+import {
+  buildPageList,
+  PaginatedTable,
+  type PerPage,
+} from '../components/PaginatedTable'
 import './productsTab.css'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -12,6 +17,7 @@ type ProductRow = {
   vendor: string
   productType: string
   price: string
+  comparePrice: string
   status: 'In Stock' | 'Out of Stock'
   imageUrl?: string
   collections: string[]
@@ -21,12 +27,11 @@ type CollectionRow = {
   id: number
   name: string
   path: string
-  productCount: string
+  productCount: number
   handle: string
 }
 
 type StockFilter = 'all' | 'in' | 'out'
-type PerPage = 10 | 25 | 50
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +51,7 @@ function rowToProduct(p: CatalogProductRow): ProductRow {
 
   const variants = p.variants as Array<{ price?: string; available?: boolean }> | undefined
   let price = '—'
+  let comparePrice = '—'
   if (variants?.length) {
     const prices = variants.map((v) => v.price).filter((x): x is string => x != null && x !== '')
     if (prices.length) {
@@ -55,6 +61,20 @@ function rowToProduct(p: CatalogProductRow): ProductRow {
       const fmt = (n: number) =>
         n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       price = min === max ? `$${fmt(min)}` : `from $${fmt(min)}`
+    }
+    const compareAtPrices = variants
+      .map((v) => (v as { compare_at_price?: string }).compare_at_price)
+      .filter((x): x is string => x != null && x !== '')
+    if (compareAtPrices.length) {
+      const nums = compareAtPrices.map((x) => parseFloat(x))
+      const valid = nums.filter((n) => Number.isFinite(n) && n > 0)
+      if (valid.length) {
+        const min = Math.min(...valid)
+        const max = Math.max(...valid)
+        const fmt = (n: number) =>
+          n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        comparePrice = min === max ? `$${fmt(min)}` : `from $${fmt(min)}`
+      }
     }
   }
 
@@ -74,13 +94,14 @@ function rowToProduct(p: CatalogProductRow): ProductRow {
     const im = p.image as { src?: string } | undefined
     if (im?.src) imageUrl = im.src
   }
+  imageUrl = toSmallImageUrl(imageUrl)
 
   const rawP = p as Record<string, unknown>
   const collections = Array.isArray(rawP._collections)
     ? (rawP._collections as string[])
     : []
 
-  return { id: p.id, name: title, path, vendor, productType, price, status, imageUrl, collections }
+  return { id: p.id, name: title, path, vendor, productType, price, comparePrice, status, imageUrl, collections }
 }
 
 function collectionFromRow(c: CatalogCollectionRow, idx: number): CollectionRow {
@@ -88,8 +109,19 @@ function collectionFromRow(c: CatalogCollectionRow, idx: number): CollectionRow 
   const handle = String(c.handle ?? '')
   const path = handle ? `/collections/${handle}` : '—'
   const pc = (c as { products_count?: number }).products_count
-  const productCount = typeof pc === 'number' ? String(pc) : '—'
+  const productCount = typeof pc === 'number' ? pc : 0
   return { id: c.id, name: title, path, productCount, handle }
+}
+
+function toSmallImageUrl(url?: string): string | undefined {
+  if (!url) return url
+  const m = url.match(/\.(jpe?g|png|gif|webp)(\?[^#]*)?(#.*)?$/i)
+  if (!m) return url
+  const ext = m[1]
+  const query = m[2] ?? ''
+  const hash = m[3] ?? ''
+  const withoutSuffix = url.slice(0, m.index)
+  return `${withoutSuffix}_100x.${ext}${query}${hash}`
 }
 
 function formatRelative(t: number): string {
@@ -100,24 +132,6 @@ function formatRelative(t: number): string {
   const h = Math.floor(m / 60)
   if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
   return `${Math.floor(h / 24)} day(s) ago`
-}
-
-function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
-  if (total <= 0) return []
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const want = new Set(
-    [1, total, current, current - 1, current + 1].filter((n) => n >= 1 && n <= total),
-  )
-  for (let i = 1; i <= 5; i++) want.add(i)
-  const sorted = [...want].sort((a, b) => a - b)
-  const out: (number | 'ellipsis')[] = []
-  let prev = 0
-  for (const p of sorted) {
-    if (p - prev > 1) out.push('ellipsis')
-    out.push(p)
-    prev = p
-  }
-  return out
 }
 
 function exportRowsJson(filename: string, rows: ProductRow[]) {
@@ -137,70 +151,17 @@ const IMG_PLACEHOLDER = (
   </svg>
 )
 
-// ─── Pagination strip component ───────────────────────────────────────────────
-
-function PaginationStrip({
-  currentPage,
-  totalPages,
-  pageList,
-  onPage,
-}: {
-  currentPage: number
-  totalPages: number
-  pageList: (number | 'ellipsis')[]
-  onPage: (p: number) => void
-}) {
-  return (
-    <div className="page-controls" aria-label="Pagination">
-      <button
-        type="button"
-        className="page-btn"
-        disabled={currentPage <= 1}
-        onClick={() => onPage(Math.max(1, currentPage - 1))}
-        aria-label="Previous page"
-      >
-        <ChevronLeft size={14} strokeWidth={2} />
-      </button>
-      {pageList.map((p, i) =>
-        p === 'ellipsis' ? (
-          <span key={`e-${i}`} className="page-btn ellipsis" aria-hidden>
-            …
-          </span>
-        ) : (
-          <button
-            key={p}
-            type="button"
-            className={`page-btn${p === currentPage ? ' active' : ''}`}
-            onClick={() => onPage(p)}
-          >
-            {p}
-          </button>
-        ),
-      )}
-      <button
-        type="button"
-        className="page-btn"
-        disabled={currentPage >= totalPages}
-        onClick={() => onPage(Math.min(totalPages, currentPage + 1))}
-        aria-label="Next page"
-      >
-        <ChevronRight size={14} strokeWidth={2} />
-      </button>
-    </div>
-  )
-}
-
 // ─── Filter modal ─────────────────────────────────────────────────────────────
 
 function FilterModal({
   stockFilter,
   setStockFilter,
-  vendorFilter,
-  setVendorFilter,
-  typeFilter,
-  setTypeFilter,
-  catalogFilter,
-  setCatalogFilter,
+  vendorFilters,
+  toggleVendorFilter,
+  typeFilters,
+  toggleTypeFilter,
+  catalogFilters,
+  toggleCatalogFilter,
   vendors,
   types,
   collections,
@@ -209,12 +170,12 @@ function FilterModal({
 }: {
   stockFilter: StockFilter
   setStockFilter: (v: StockFilter) => void
-  vendorFilter: string
-  setVendorFilter: (v: string) => void
-  typeFilter: string
-  setTypeFilter: (v: string) => void
-  catalogFilter: string
-  setCatalogFilter: (v: string) => void
+  vendorFilters: string[]
+  toggleVendorFilter: (v: string) => void
+  typeFilters: string[]
+  toggleTypeFilter: (v: string) => void
+  catalogFilters: string[]
+  toggleCatalogFilter: (v: string) => void
   vendors: string[]
   types: string[]
   collections: CollectionRow[]
@@ -239,9 +200,9 @@ function FilterModal({
 
   const activeCount = [
     stockFilter !== 'all',
-    vendorFilter !== '__all__',
-    typeFilter !== '__all__',
-    catalogFilter !== '__all__',
+    vendorFilters.length > 0,
+    typeFilters.length > 0,
+    catalogFilters.length > 0,
   ].filter(Boolean).length
 
   return (
@@ -281,55 +242,75 @@ function FilterModal({
             </div>
           </div>
 
-          {/* Catalog */}
+          {/* Collections */}
           <div className="filter-section">
-            <div className="filter-section-label">Catalog (Collection)</div>
-            <select
-              className="filter-full-select"
-              value={catalogFilter}
-              onChange={(e) => setCatalogFilter(e.target.value)}
-            >
-              <option value="__all__">All collections</option>
-              {collections.map((c) => (
-                <option key={c.id} value={c.handle}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <div className="filter-section-label">Collections</div>
+            <details className="filter-multi">
+              <summary className="filter-multi-summary">
+                {catalogFilters.length ? `${catalogFilters.length} selected` : 'All collections'}
+              </summary>
+              <div className="filter-multi-list">
+                {collections.map((c) => {
+                  const checked = catalogFilters.includes(c.handle)
+                  const disabled = c.productCount <= 0
+                  return (
+                    <label key={c.id} className={`filter-check-row${disabled ? ' is-disabled' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() => toggleCatalogFilter(c.handle)}
+                      />
+                      <span>{c.name} ({c.productCount})</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </details>
           </div>
 
           {/* Vendor */}
           <div className="filter-section">
             <div className="filter-section-label">Vendor</div>
-            <select
-              className="filter-full-select"
-              value={vendorFilter}
-              onChange={(e) => setVendorFilter(e.target.value)}
-            >
-              <option value="__all__">All vendors</option>
-              {vendors.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
+            <details className="filter-multi">
+              <summary className="filter-multi-summary">
+                {vendorFilters.length ? `${vendorFilters.length} selected` : 'All vendors'}
+              </summary>
+              <div className="filter-multi-list">
+                {vendors.map((v) => (
+                  <label key={v} className="filter-check-row">
+                    <input
+                      type="checkbox"
+                      checked={vendorFilters.includes(v)}
+                      onChange={() => toggleVendorFilter(v)}
+                    />
+                    <span>{v}</span>
+                  </label>
+                ))}
+              </div>
+            </details>
           </div>
 
           {/* Type */}
           <div className="filter-section">
             <div className="filter-section-label">Product Type</div>
-            <select
-              className="filter-full-select"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-            >
-              <option value="__all__">All types</option>
-              {types.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            <details className="filter-multi">
+              <summary className="filter-multi-summary">
+                {typeFilters.length ? `${typeFilters.length} selected` : 'All types'}
+              </summary>
+              <div className="filter-multi-list">
+                {types.map((t) => (
+                  <label key={t} className="filter-check-row">
+                    <input
+                      type="checkbox"
+                      checked={typeFilters.includes(t)}
+                      onChange={() => toggleTypeFilter(t)}
+                    />
+                    <span>{t}</span>
+                  </label>
+                ))}
+              </div>
+            </details>
           </div>
         </div>
 
@@ -345,9 +326,40 @@ function FilterModal({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type Props = { storeInfo: StoreInfo | null }
+type Props = {
+  storeInfo: StoreInfo | null
+  initialView?: 'products' | 'collections'
+  initialPage?: number
+  initialSearch?: string
+  initialStockFilter?: StockFilter
+  initialVendorFilters?: string[]
+  initialTypeFilters?: string[]
+  initialCatalogFilters?: string[]
+  initialPerPage?: PerPage
+  onPersistViewState?: (payload: {
+    view: 'products' | 'collections'
+    page: number
+    search: string
+    stockFilter: StockFilter
+    vendorFilters: string[]
+    typeFilters: string[]
+    catalogFilters: string[]
+    perPage: PerPage
+  }) => void
+}
 
-export default function ScraperPage({ storeInfo }: Props) {
+export default function ScraperPage({
+  storeInfo,
+  initialView = 'products',
+  initialPage = 1,
+  initialSearch = '',
+  initialStockFilter = 'all',
+  initialVendorFilters = [],
+  initialTypeFilters = [],
+  initialCatalogFilters = [],
+  initialPerPage = 10,
+  onPersistViewState,
+}: Props) {
   const [storeProducts, setStoreProducts] = useState<CatalogProductRow[]>(
     window.storeData?.products ?? [],
   )
@@ -355,15 +367,15 @@ export default function ScraperPage({ storeInfo }: Props) {
     window.storeData?.collections ?? [],
   )
 
-  const [search, setSearch] = useState('')
-  const [stockFilter, setStockFilter] = useState<StockFilter>('all')
-  const [vendorFilter, setVendorFilter] = useState('__all__')
-  const [typeFilter, setTypeFilter] = useState('__all__')
-  const [catalogFilter, setCatalogFilter] = useState('__all__')
+  const [search, setSearch] = useState(initialSearch)
+  const [stockFilter, setStockFilter] = useState<StockFilter>(initialStockFilter)
+  const [vendorFilters, setVendorFilters] = useState<string[]>(initialVendorFilters)
+  const [typeFilters, setTypeFilters] = useState<string[]>(initialTypeFilters)
+  const [catalogFilters, setCatalogFilters] = useState<string[]>(initialCatalogFilters)
   const [showFilters, setShowFilters] = useState(false)
-  const [mainView, setMainView] = useState<'products' | 'collections'>('products')
+  const [mainView, setMainView] = useState<'products' | 'collections'>(initialView)
   const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState<PerPage>(10)
+  const [perPage, setPerPage] = useState<PerPage>(initialPerPage)
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
   // Sync from storeData whenever storeInfo changes (background wrote new data)
@@ -371,6 +383,11 @@ export default function ScraperPage({ storeInfo }: Props) {
     setStoreProducts(window.storeData?.products ?? [])
     setStoreCollections(window.storeData?.collections ?? [])
   }, [storeInfo?.detectedAt, storeInfo?.productsSample, storeInfo?.collectionsSample])
+
+  // Parent may switch sub-view (e.g. Overview → Collections stat opens Products tab on collections).
+  useEffect(() => {
+    setMainView(initialView)
+  }, [initialView])
 
   // Derived rows
   const productRows: ProductRow[] = useMemo(
@@ -393,6 +410,10 @@ export default function ScraperPage({ storeInfo }: Props) {
     for (const r of productRows) if (r.productType !== '—') s.add(r.productType)
     return [...s].sort()
   }, [productRows])
+  const collectionNameByHandle = useMemo(
+    () => new Map(collectionRows.map((c) => [c.handle, c.name])),
+    [collectionRows],
+  )
 
   const filteredProducts = useMemo(() => {
     let rows = productRows
@@ -400,11 +421,13 @@ export default function ScraperPage({ storeInfo }: Props) {
     if (q) rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.vendor.toLowerCase().includes(q))
     if (stockFilter === 'in') rows = rows.filter((r) => r.status === 'In Stock')
     if (stockFilter === 'out') rows = rows.filter((r) => r.status === 'Out of Stock')
-    if (vendorFilter !== '__all__') rows = rows.filter((r) => r.vendor === vendorFilter)
-    if (typeFilter !== '__all__') rows = rows.filter((r) => r.productType === typeFilter)
-    if (catalogFilter !== '__all__') rows = rows.filter((r) => r.collections.includes(catalogFilter))
+    if (vendorFilters.length > 0) rows = rows.filter((r) => vendorFilters.includes(r.vendor))
+    if (typeFilters.length > 0) rows = rows.filter((r) => typeFilters.includes(r.productType))
+    if (catalogFilters.length > 0) {
+      rows = rows.filter((r) => r.collections.some((h) => catalogFilters.includes(h)))
+    }
     return rows
-  }, [productRows, search, stockFilter, vendorFilter, typeFilter, catalogFilter])
+  }, [productRows, search, stockFilter, vendorFilters, typeFilters, catalogFilters])
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / perPage))
   const currentPage = Math.min(page, totalPages)
@@ -413,8 +436,101 @@ export default function ScraperPage({ storeInfo }: Props) {
     return filteredProducts.slice(start, start + perPage)
   }, [filteredProducts, currentPage, perPage])
   const pageList = useMemo(() => buildPageList(currentPage, totalPages), [currentPage, totalPages])
+  const collectionsTotalPages = Math.max(1, Math.ceil(collectionRows.length / perPage))
+  const collectionsCurrentPage = Math.min(page, collectionsTotalPages)
+  const collectionPageItems = useMemo(() => {
+    const start = (collectionsCurrentPage - 1) * perPage
+    return collectionRows.slice(start, start + perPage)
+  }, [collectionRows, collectionsCurrentPage, perPage])
+  const collectionsPageList = useMemo(
+    () => buildPageList(collectionsCurrentPage, collectionsTotalPages),
+    [collectionsCurrentPage, collectionsTotalPages],
+  )
+  function goToPage(targetPage: number) {
+    const maxPages = mainView === 'products' ? totalPages : collectionsTotalPages
+    const next = Math.min(Math.max(1, targetPage), Math.max(1, maxPages))
+    setPage(next)
+  }
+  useEffect(() => {
+    const w = window as Window & {
+      goToPage?: (targetPage: number) => void
+      spykitGoToPage?: (targetPage: number) => void
+    }
+    w.goToPage = goToPage
+    w.spykitGoToPage = goToPage
+    return () => {
+      if (w.goToPage === goToPage) delete w.goToPage
+      if (w.spykitGoToPage === goToPage) delete w.spykitGoToPage
+    }
+  }, [goToPage])
 
-  useEffect(() => { setPage(1) }, [search, stockFilter, vendorFilter, typeFilter, catalogFilter, perPage, mainView])
+  // Always points to the freshest goToPage closure so delayed callbacks use current state.
+  const goToPageRef = useRef(goToPage)
+  useEffect(() => { goToPageRef.current = goToPage })
+
+  const didMountRef = useRef(false)
+  const restoreDoneRef = useRef(false)
+  const desiredInitialPageRef = useRef(Math.max(1, initialPage))
+  // Holds the restore timer so we can cancel it only on unmount (not on dep changes).
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    // Keep restored page on first render; only reset on later filter/view changes.
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      return
+    }
+    setPage(1)
+  }, [search, stockFilter, vendorFilters, typeFilters, catalogFilters, perPage, mainView])
+
+  useEffect(() => {
+    // Wait for data to settle, then jump to the saved page.
+    // BUG FIX: do NOT return a cleanup fn here — catalogLoading flipping true→false would
+    // cancel the timer via cleanup before the new effect run returns early on restoreDoneRef.
+    if (restoreDoneRef.current) return
+    const catalogReady = storeProducts.length > 0 || storeInfo?.catalogLoading === false
+    if (!catalogReady) return
+    restoreDoneRef.current = true
+    restoreTimerRef.current = setTimeout(() => {
+      const target = desiredInitialPageRef.current
+      goToPageRef.current(target)
+    }, 250)
+    // No cleanup here on purpose — see comment above.
+  }, [storeProducts.length, storeInfo?.catalogLoading, totalPages])
+
+  // Cancel restore timer only when the component actually unmounts.
+  useEffect(() => () => {
+    if (restoreTimerRef.current != null) clearTimeout(restoreTimerRef.current)
+  }, [])
+
+  const persistCbRef = useRef(onPersistViewState)
+  useEffect(() => {
+    persistCbRef.current = onPersistViewState
+  }, [onPersistViewState])
+
+  useEffect(() => {
+    if (!restoreDoneRef.current) return
+    persistCbRef.current?.({
+      view: mainView,
+      page: mainView === 'products' ? currentPage : collectionsCurrentPage,
+      search,
+      stockFilter,
+      vendorFilters,
+      typeFilters,
+      catalogFilters,
+      perPage,
+    })
+  }, [
+    mainView,
+    currentPage,
+    collectionsCurrentPage,
+    search,
+    stockFilter,
+    vendorFilters,
+    typeFilters,
+    catalogFilters,
+    perPage,
+  ])
 
   // Select-all for current page
   const allPageSelected = pageItems.length > 0 && pageItems.every((r) => selected.has(r.id))
@@ -449,35 +565,52 @@ export default function ScraperPage({ storeInfo }: Props) {
 
   function resetFilters() {
     setStockFilter('all')
-    setVendorFilter('__all__')
-    setTypeFilter('__all__')
-    setCatalogFilter('__all__')
+    setVendorFilters([])
+    setTypeFilters([])
+    setCatalogFilters([])
+  }
+
+  function toggleValue(current: string[], val: string, setter: (vals: string[]) => void) {
+    if (!val) return
+    setter(current.includes(val) ? current.filter((x) => x !== val) : [...current, val])
   }
 
   const activeFilterCount = [
     stockFilter !== 'all',
-    vendorFilter !== '__all__',
-    typeFilter !== '__all__',
-    catalogFilter !== '__all__',
+    vendorFilters.length > 0,
+    typeFilters.length > 0,
+    catalogFilters.length > 0,
   ].filter(Boolean).length
 
-  const showLoadingRows = storeInfo?.catalogLoading === true && storeProducts.length === 0
+  // Show skeletons by default while catalog state is unresolved/starting.
+  // Only stop skeletons when loading is explicitly false and we still have no products.
+  const showLoadingRows = storeProducts.length === 0 && storeInfo?.catalogLoading !== false
+
+  // Delay the "no products" empty message slightly to avoid a 1-frame flash
+  // between skeletons disappearing and data rows appearing.
+  const [showEmptyMessage, setShowEmptyMessage] = useState(false)
+  useEffect(() => {
+    if (showLoadingRows || storeProducts.length > 0) {
+      setShowEmptyMessage(false)
+      return
+    }
+    const t = setTimeout(() => setShowEmptyMessage(true), 300)
+    return () => clearTimeout(t)
+  }, [showLoadingRows, storeProducts.length])
 
   // Shared pagination strip props
-  const paginationProps = { currentPage, totalPages, pageList, onPage: setPage }
-
   return (
     <div className="products-tab">
       {showFilters && (
         <FilterModal
           stockFilter={stockFilter}
           setStockFilter={setStockFilter}
-          vendorFilter={vendorFilter}
-          setVendorFilter={setVendorFilter}
-          typeFilter={typeFilter}
-          setTypeFilter={setTypeFilter}
-          catalogFilter={catalogFilter}
-          setCatalogFilter={setCatalogFilter}
+          vendorFilters={vendorFilters}
+          toggleVendorFilter={(v) => toggleValue(vendorFilters, v, setVendorFilters)}
+          typeFilters={typeFilters}
+          toggleTypeFilter={(v) => toggleValue(typeFilters, v, setTypeFilters)}
+          catalogFilters={catalogFilters}
+          toggleCatalogFilter={(v) => toggleValue(catalogFilters, v, setCatalogFilters)}
           vendors={vendors}
           types={types}
           collections={collectionRows}
@@ -500,79 +633,101 @@ export default function ScraperPage({ storeInfo }: Props) {
                 autoComplete="off"
               />
             </div>
-            <button
-              type="button"
-              className={`pt-btn pt-btn-outline${activeFilterCount ? ' pt-btn-outline-active' : ''}`}
-              onClick={() => setShowFilters(true)}
-              aria-label="Open filters"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M3 5H21L14 13V19L10 21V13L3 5Z" stroke="#7C6CF2" strokeWidth="2" strokeLinejoin="round" />
-              </svg>
-              Filters
-              {activeFilterCount > 0 && (
-                <span className="filter-count-badge">{activeFilterCount}</span>
-              )}
-            </button>
-          </div>
-
-          {/* ── Sub-nav ───────────────────────────────────── */}
-          <div className="sub-nav" role="tablist">
-            <button
-              type="button"
-              className={`sub-nav-item${mainView === 'products' ? ' active' : ''}`}
-              onClick={() => setMainView('products')}
-            >
-              <Package size={14} strokeWidth={2} /> Products
-            </button>
-            <button
-              type="button"
-              className={`sub-nav-item${mainView === 'collections' ? ' active' : ''}`}
-              onClick={() => setMainView('collections')}
-            >
-              <Folder size={14} strokeWidth={2} /> Collections
-            </button>
+            <div className="toolbar-right">
+              <div className="sub-nav" role="tablist">
+                <button
+                  type="button"
+                  className={`sub-nav-item${mainView === 'products' ? ' active' : ''}`}
+                  onClick={() => setMainView('products')}
+                >
+                  <Package size={14} strokeWidth={2} /> Products
+                </button>
+                <button
+                  type="button"
+                  className={`sub-nav-item${mainView === 'collections' ? ' active' : ''}`}
+                  onClick={() => setMainView('collections')}
+                >
+                  <Folder size={14} strokeWidth={2} /> Collections
+                </button>
+              </div>
+              <button
+                type="button"
+                className={`pt-btn pt-btn-outline${activeFilterCount ? ' pt-btn-outline-active' : ''}`}
+                onClick={() => setShowFilters(true)}
+                aria-label="Open filters"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M3 5H21L14 13V19L10 21V13L3 5Z" stroke="#7C6CF2" strokeWidth="2" strokeLinejoin="round" />
+                </svg>
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="filter-count-badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </div>
           </div>
 
           {/* ── Products table ────────────────────────────── */}
           {mainView === 'products' && (
-            <>
-              {/* top pagination */}
-              <div className="pagination-top">
-                <span className="pagination-count">
-                  {filteredProducts.length
-                    ? `${(currentPage - 1) * perPage + 1}–${Math.min(currentPage * perPage, filteredProducts.length)} of ${filteredProducts.length.toLocaleString()} products`
-                    : '0 products'}
-                </span>
-                <PaginationStrip {...paginationProps} />
-              </div>
-
-              <div className="table-card">
-                <table className="products-table">
-                  <thead>
-                    <tr>
-                      <th className="checkbox-cell">
-                        <input
-                          ref={selectAllRef}
-                          type="checkbox"
-                          className="custom-checkbox"
-                          checked={allPageSelected}
-                          onChange={toggleSelectAll}
-                          aria-label="Select all on this page"
-                        />
-                      </th>
-                      <th>Product</th>
-                      <th>Vendor</th>
-                      <th>Type</th>
-                      <th>Price</th>
-                      <th>Status</th>
-                      <th aria-hidden> </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+            <PaginatedTable
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageList={pageList}
+              onPage={goToPage}
+              perPage={perPage}
+              onPerPage={setPerPage}
+              totalItems={filteredProducts.length}
+              itemLabel="products"
+              floatingBar={
+                selected.size > 0 ? (
+                  <div className="floating-bar" role="status">
+                    <div className="selection-count">
+                      {selected.size} product{selected.size === 1 ? '' : 's'} selected
+                    </div>
+                    <button type="button" className="pt-btn btn-clear" onClick={() => setSelected(new Set())}>
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      className="pt-btn btn-export"
+                      onClick={() => {
+                        const all = new Map(productRows.map((r) => [r.id, r]))
+                        const sel = [...selected].map((id) => all.get(id)).filter((r): r is ProductRow => r != null)
+                        exportRowsJson(`spykit-products-${Date.now()}.json`, sel)
+                      }}
+                    >
+                      Export selected <span aria-hidden>→</span>
+                    </button>
+                  </div>
+                ) : undefined
+              }
+            >
+              <thead>
+                <tr>
+                  <th className="checkbox-cell">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      className="custom-checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleSelectAll}
+                      aria-label="Select all on this page"
+                    />
+                  </th>
+                  <th>Product</th>
+                  <th>Vendor</th>
+                  <th>Type</th>
+                  <th>Price</th>
+                  <th>Compare Price</th>
+                  <th>Collection</th>
+                  <th>Status</th>
+                  <th aria-hidden> </th>
+                </tr>
+              </thead>
+              <tbody key={currentPage}>
                     {/* skeleton rows */}
                     {showLoadingRows &&
-                      Array.from({ length: 3 }, (_, idx) => (
+                      Array.from({ length: 10 }, (_, idx) => (
                         <tr key={`sk-${idx}`} className="pt-skeleton-row">
                           <td className="checkbox-cell"><span className="pt-skeleton pt-skeleton-box" /></td>
                           <td>
@@ -587,15 +742,20 @@ export default function ScraperPage({ storeInfo }: Props) {
                           <td><span className="pt-skeleton pt-skeleton-pill" /></td>
                           <td><span className="pt-skeleton pt-skeleton-text" /></td>
                           <td><span className="pt-skeleton pt-skeleton-text" /></td>
+                          <td><span className="pt-skeleton pt-skeleton-text" /></td>
                           <td><span className="pt-skeleton pt-skeleton-pill" /></td>
                           <td><span className="pt-skeleton pt-skeleton-box" /></td>
                         </tr>
                       ))}
 
-                    {/* data rows */}
+                    {/* data rows — tbody key resets animation on every page change */}
                     {!showLoadingRows &&
-                      pageItems.map((r) => (
-                        <tr key={r.id}>
+                      pageItems.map((r, idx) => (
+                        <tr
+                          key={r.id}
+                          className="pt-data-row"
+                          style={{ animationDelay: `${idx * 18}ms` }}
+                        >
                           <td className="checkbox-cell">
                             <input
                               type="checkbox"
@@ -644,6 +804,21 @@ export default function ScraperPage({ storeInfo }: Props) {
                           <td><span className="pt-badge badge-vendor">{r.vendor}</span></td>
                           <td><span className="type-text">{r.productType}</span></td>
                           <td><span className="price-text">{r.price}</span></td>
+                          <td><span className="type-text">{r.comparePrice}</span></td>
+                          <td>
+                            <span
+                              className="type-text"
+                              title={
+                                r.collections.length
+                                  ? r.collections
+                                      .map((h) => collectionNameByHandle.get(h) ?? h)
+                                      .join(', ')
+                                  : '—'
+                              }
+                            >
+                              {r.collections.length || 0}
+                            </span>
+                          </td>
                           <td>
                             <span className={`pt-badge ${r.status === 'In Stock' ? 'badge-success' : 'badge-error'}`}>
                               {r.status}
@@ -662,110 +837,77 @@ export default function ScraperPage({ storeInfo }: Props) {
                         </tr>
                       ))}
 
-                    {!showLoadingRows && !pageItems.length && (
+                    {showEmptyMessage && !showLoadingRows && !pageItems.length && (
                       <tr>
-                        <td colSpan={7} className="pt-empty" style={{ border: 'none' }}>
+                        <td colSpan={9} className="pt-empty" style={{ border: 'none' }}>
                           No products loaded yet. Keep this popup open while catalog sync finishes.
                         </td>
                       </tr>
                     )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* floating selection bar */}
-              {selected.size > 0 && (
-                <div className="floating-bar" role="status">
-                  <div className="selection-count">
-                    {selected.size} product{selected.size === 1 ? '' : 's'} selected
-                  </div>
-                  <button type="button" className="pt-btn btn-clear" onClick={() => setSelected(new Set())}>
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    className="pt-btn btn-export"
-                    onClick={() => {
-                      const all = new Map(productRows.map((r) => [r.id, r]))
-                      const rows = [...selected].map((id) => all.get(id)).filter((r): r is ProductRow => r != null)
-                      exportRowsJson(`spykit-products-${Date.now()}.json`, rows)
-                    }}
-                  >
-                    Export selected <span aria-hidden>→</span>
-                  </button>
-                </div>
-              )}
-
-              {/* bottom pagination */}
-              <div className="pagination-footer">
-                <div>
-                  {filteredProducts.length
-                    ? `Showing ${(currentPage - 1) * perPage + 1}–${Math.min(currentPage * perPage, filteredProducts.length)} of ${filteredProducts.length.toLocaleString()} products`
-                    : '0 products'}
-                </div>
-                <PaginationStrip {...paginationProps} />
-                <div className="per-page">
-                  <span>Per page</span>
-                  <select
-                    className="per-page-select"
-                    value={perPage}
-                    onChange={(e) => setPerPage(Number(e.target.value) as PerPage)}
-                    aria-label="Rows per page"
-                  >
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                  </select>
-                </div>
-              </div>
-            </>
+              </tbody>
+            </PaginatedTable>
           )}
 
           {/* ── Collections table ─────────────────────────── */}
           {mainView === 'collections' && (
-            <div className="table-card">
-              <table className="products-table collections-main-table">
-                <thead>
-                  <tr>
-                    <th>Collection</th>
-                    <th>Handle</th>
-                    <th>Products</th>
-                    <th aria-hidden> </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {collectionRows.map((c) => (
-                    <tr key={c.id}>
-                      <td>
-                        <div className="product-cell">
-                          <div className="col-icon" style={{ marginRight: 0 }}>
-                            <Folder size={14} strokeWidth={2} />
-                          </div>
-                          <div className="product-info">
-                            <span className="collection-cell-title">{c.name}</span>
-                            <span className="product-url">{c.path}</span>
-                          </div>
+            <PaginatedTable
+              currentPage={collectionsCurrentPage}
+              totalPages={collectionsTotalPages}
+              pageList={collectionsPageList}
+              onPage={goToPage}
+              perPage={perPage}
+              onPerPage={setPerPage}
+              totalItems={collectionRows.length}
+              itemLabel="collections"
+              tableClassName="products-table collections-main-table"
+            >
+              <thead>
+                <tr>
+                  <th>Collection</th>
+                  <th>Handle</th>
+                  <th>Products</th>
+                  <th aria-hidden> </th>
+                </tr>
+              </thead>
+              <tbody>
+                {collectionPageItems.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <div className="product-cell">
+                        <div className="col-icon" style={{ marginRight: 0 }}>
+                          <Folder size={14} strokeWidth={2} />
                         </div>
-                      </td>
-                      <td><span className="type-text">{c.handle || '—'}</span></td>
-                      <td><span className="pt-badge badge-vendor">{c.productCount} products</span></td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button type="button" className="link-icon" onClick={() => openPath(c.path)}>
-                          <Link2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!collectionRows.length && (
-                    <tr>
-                      <td colSpan={4} className="pt-empty" style={{ border: 'none' }}>
-                        No collections loaded yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                        <div className="product-info">
+                          <button
+                            type="button"
+                            className="collection-cell-title product-name-btn"
+                            title={c.name}
+                            onClick={() => openPath(c.path)}
+                          >
+                            {c.name}
+                          </button>
+                          <span className="product-url">{c.path}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span className="type-text">{c.handle || '—'}</span></td>
+                    <td><span className="pt-badge badge-vendor">{c.productCount} products</span></td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button type="button" className="link-icon" onClick={() => openPath(c.path)}>
+                        <Link2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!collectionRows.length && (
+                  <tr>
+                    <td colSpan={4} className="pt-empty" style={{ border: 'none' }}>
+                      No collections loaded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </PaginatedTable>
           )}
 
           {/* ── Meta footer ───────────────────────────────── */}

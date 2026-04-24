@@ -10,6 +10,18 @@ function postToContent(data) {
   window.postMessage({ ...data, __spykit: true }, '*')
 }
 
+/** `<meta name="author" content="…">` — main world reads the live DOM (same as content script). */
+function readStoreNameFromAuthorMeta() {
+  const metas = document.querySelectorAll('meta[name]')
+  for (const el of metas) {
+    const name = el.getAttribute('name')
+    if (!name || name.toLowerCase() !== 'author') continue
+    const c = el.getAttribute('content')?.trim()
+    if (c) return c
+  }
+  return undefined
+}
+
 function waitForShopifyTheme(maxMs = 10000) {
   return new Promise((resolve) => {
     const start = Date.now()
@@ -143,6 +155,8 @@ async function run() {
       ? shop.trim()
       : location.hostname
 
+  const storeName = readStoreNameFromAuthorMeta()
+
   postToContent({
     type: 'PAGE_DATA',
     from: 'injected',
@@ -151,6 +165,7 @@ async function run() {
       theme,
       apps,
       shopifyThemeRaw,
+      ...(storeName ? { storeName } : {}),
     },
   })
 }
