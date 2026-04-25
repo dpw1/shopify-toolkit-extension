@@ -253,20 +253,65 @@
   flex-wrap: wrap;
 }
 
-.stores-tab .flag { font-size: 14px; }
+/* flag-icons (npm `flag-icons`) — `.fi` + `.fis` square ratio */
+.stores-tab .stores-tab-flag.fi {
+  font-size: 0.95rem;
+  line-height: 1;
+  width: 1.2em;
+  flex-shrink: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
 
-/* ships-to chips */
-.stores-tab .ships-chip {
+.stores-tab .intel-sub--with-flag {
+  gap: 8px;
+}
+
+/* Ships to: rectangular flags only; country code + name in native tooltip */
+.stores-tab .ships-to-flags {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.stores-tab .ships-flag-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: var(--bg-body);
-  border: 1px solid var(--border-dark);
+  justify-content: center;
+  /* line-height: 0 collapses flag-icons’ :before strut in nested flex; keep a real line box */
+  line-height: 1;
+  min-height: 1.75rem;
+  min-width: 2rem;
+  flex-shrink: 0;
+  cursor: default;
   border-radius: var(--radius-sm);
-  padding: 3px 7px;
+  padding: 2px;
+  border: 1px solid var(--border-dark);
+  background: var(--bg-body);
+}
+
+.stores-tab .ships-flag-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-dark);
+}
+
+.stores-tab .stores-tab-flag--ships.fi {
+  font-size: 1.35rem;
+  width: 1.55em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+  box-shadow: none;
+}
+
+.stores-tab .ships-more {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--text-main);
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  cursor: default;
 }
 
 /* ── Social icons ────────────────────────────────────────────────────────────── */
@@ -311,6 +356,33 @@
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 10px;
+  align-items: center;
+}
+
+/* SVG payment marks from `samples/payment-icons.html` (injected via PaymentBrandIcon). */
+.stores-tab .payment-brand-html {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+.stores-tab .payment-brand-html svg {
+  height: 24px;
+  width: auto;
+  max-width: 52px;
+  vertical-align: middle;
+}
+.stores-tab .payment-brand-fallback {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border: 1px solid var(--border-dark);
+  border-radius: 4px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
 }
 
 .stores-tab .pay-badge {
@@ -382,3 +454,79 @@
 }
 .stores-tab .not-connected svg { opacity: 0.35; }
 .stores-tab .not-connected p { font-size: var(--text-sm); }
+
+/* ── Store tab skeleton (initial popup load) ─────────────────────────────────── */
+@keyframes st-sk-pulse {
+  0%,
+  100% { opacity: 0.38; }
+  50% { opacity: 1; }
+}
+
+.stores-tab--skeleton .st-sk {
+  border-radius: var(--radius-sm);
+  background: var(--border-dark);
+  animation: st-sk-pulse 1.15s ease-in-out infinite;
+}
+
+.stores-tab--skeleton .st-sk-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.stores-tab--skeleton .st-sk-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stores-tab--skeleton .st-sk-title {
+  height: 22px;
+  width: 55%;
+  max-width: 200px;
+}
+
+.stores-tab--skeleton .st-sk-line {
+  height: 12px;
+  width: 100%;
+}
+.stores-tab--skeleton .st-sk-line--xs { width: 40%; height: 10px; }
+.stores-tab--skeleton .st-sk-line--sm { width: 70%; height: 10px; }
+.stores-tab--skeleton .st-sk-line--md { width: 85%; }
+
+.stores-tab--skeleton .st-sk-value {
+  height: 18px;
+  width: 45%;
+}
+
+.stores-tab--skeleton .st-sk-section-title {
+  height: 16px;
+  width: 38%;
+  max-width: 160px;
+  margin-bottom: 4px;
+}
+
+.stores-tab--skeleton .st-sk-stat {
+  pointer-events: none;
+  cursor: default;
+}
+
+.stores-tab--skeleton .st-sk-intel {
+  pointer-events: none;
+  min-height: 88px;
+}
+
+.stores-tab--skeleton .st-sk-block {
+  height: 48px;
+  width: 100%;
+  border-radius: var(--radius-md);
+}
+
+.stores-tab--skeleton .st-sk-pay-row {
+  height: 36px;
+  width: 100%;
+  border-radius: var(--radius-md);
+}

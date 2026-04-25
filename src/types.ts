@@ -1,4 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 3 days in milliseconds — TTL for per-store cache entries */
+export const CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Shared domain types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -90,7 +97,11 @@ export interface StoreContacts {
   emails: string[]
 }
 
-/** Popup `window.storeData` — mirror of persisted store + raw theme. */
+/**
+ * Popup `window.storeData` — theme/meta/contacts from `chrome.storage.local` cache;
+ * **`products` / `collections` are read from IndexedDB** (`spykit-db`, `by_domain`) whenever
+ * `syncPopupStoreData` runs so DevTools always see the same catalog as the DB.
+ */
 export interface SpyKitStoreData {
   /** Exact JSON clone of `window.Shopify.theme` from the storefront (same as persisted `shopifyThemeRaw`). */
   theme: Record<string, unknown> | null
@@ -108,9 +119,11 @@ export interface SpyKitStoreData {
   collectionCount: number
   catalogLoading: boolean
   detectedAt?: number
+  /** Rows loaded from IndexedDB for the active shop domain (source of truth). */
   products: CatalogProductRow[]
+  /** Rows loaded from IndexedDB for the active shop domain (source of truth). */
   collections: CatalogCollectionRow[]
-  /** Full storefront `products.json` / `collections.json` rows are in IndexedDB when true */
+  /** True when IDB has catalog rows and/or cache says a full sync completed. */
   catalogFullDataInIndexedDb: boolean
   /** Full JSON from `{origin}/meta.json` (content script). */
   shopMeta: ShopMetaJson | null
@@ -131,21 +144,45 @@ export interface StoreInfo {
   productCount: number
   collectionCount: number
   detectedAt: number
+  /** unix ms of last successful cache write */
+  cachedAt?: number
   /** True while page-world is paginating `/products.json` / `/collections.json` */
   catalogLoading?: boolean
   /** Raw `window.Shopify.theme` (serialized in page-world) */
   shopifyThemeRaw?: Record<string, unknown> | null
-  /** Full product rows copied from `/products.json` pagination. */
+  /** Full product rows loaded from IndexedDB (populated in popup, NOT persisted to chrome.storage). */
   productsSample?: CatalogProductRow[]
-  /** Full collection rows copied from `/collections.json` pagination. */
+  /** Full collection rows loaded from IndexedDB (populated in popup, NOT persisted to chrome.storage). */
   collectionsSample?: CatalogCollectionRow[]
-  /** Last catalog sync wrote full API payloads to IndexedDB. */
+  /** Full API payloads exist in IndexedDB for this domain when true. */
   catalogFullDataInIndexedDb?: boolean
   /** Social links + emails scraped from the store's storefront DOM. */
   storeContacts?: StoreContacts
 }
 
-export type PopupPageId = 'stores' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
+/**
+ * Lightweight store metadata persisted in `chrome.storage.local` under
+ * `storeCacheByDomain[domain]`.  Products and collections are NOT stored here —
+ * they live in IndexedDB, tagged with `domain` and `cachedAt`.
+ */
+export interface StoreCacheMeta {
+  domain: string
+  storeName?: string
+  detectedAt: number
+  cachedAt: number
+  theme: ShopifyTheme | null
+  shopifyThemeRaw?: Record<string, unknown> | null
+  shopMeta?: ShopMetaJson | null
+  storeContacts?: StoreContacts
+  apps: ShopifyApp[]
+  productCount: number
+  collectionCount: number
+  catalogLoading?: boolean
+  /** True once IDB has been populated for this domain */
+  catalogFullDataInIndexedDb: boolean
+}
+
+export type PopupPageId = 'store' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
 
 /**
  * Single persisted blob for all popup UI preferences.
@@ -237,6 +274,8 @@ export interface MsgStoreContacts {
 export interface MsgGetStoreInfo {
   type: 'GET_STORE_INFO'
   from: 'popup'
+  /** Canonical shop domain (e.g. `aedev.myshopify.com`) for the active tab. */
+  payload?: { host?: string }
 }
 
 /** Popup opened — fetch `/products.json` + `/collections.json` from the active tab’s `location.origin`. */
@@ -297,6 +336,13 @@ export interface MsgCatalogIdbResponse {
   }
 }
 
+/** Ephemeral UI hint — relayed to the popup when it is open (content → background → popup). */
+export interface MsgSpykitToast {
+  type: 'SPYKIT_TOAST'
+  from: 'content' | 'background'
+  payload: { message: string }
+}
+
 // ── Union ────────────────────────────────────────────────────────────────────
 export type ExtMessage =
   | MsgStoreDetected
@@ -313,12 +359,22 @@ export type ExtMessage =
   | MsgScrapeComplete
   | MsgError
   | MsgCatalogIdbResponse
+  | MsgSpykitToast
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage schema (chrome.storage.local keys)
 // ─────────────────────────────────────────────────────────────────────────────
 export interface StorageSchema {
+  /** @deprecated Legacy single-store slot — kept for one-time migration only. */
   storeInfo: StoreInfo | null
+  /** @deprecated Replaced by storeCacheByDomain — kept for one-time migration. */
+  storeInfoByHost: Record<string, StoreInfo> | null
+  /**
+   * Per-store lightweight metadata keyed by canonical shop domain
+   * (e.g. `"aedev.myshopify.com"`).  Products / collections are NOT here —
+   * they live in IndexedDB tagged with the same domain key.
+   */
+  storeCacheByDomain: Record<string, StoreCacheMeta> | null
   /** UI theme — mirrored from `popupSettings.theme` for background / older code paths */
   theme: 'light' | 'dark'
   syncCount: number
@@ -326,4 +382,9 @@ export interface StorageSchema {
   lastSyncAt: number | null
   /** All popup UI state (tabs, products tab, scroll, theme mirror) */
   popupSettings: PopupSettings | null
+  /**
+   * Ephemeral toast ping (service worker / content → popup). `at` must change
+   * on every toast so `storage.onChanged` fires reliably.
+   */
+  spykitToast?: { message: string; at: number } | null
 }

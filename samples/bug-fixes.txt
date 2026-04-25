@@ -1,0 +1,318 @@
+Here's the prompt:
+
+---
+
+**Context:** Chrome extension popup. User browses multiple Shopify stores in different tabs. A global `window.storeData` object holds all detected data for the current store. The bug is that `window.storeData` persists across tab switches, so opening the popup on tab 1 after tab 5 shows stale data from tab 5.
+
+**Goal:** Build a data persistence and retrieval system that:
+1. Identifies the current store the moment the popup opens
+2. Loads cached data for that specific store instantly
+3. Saves data keyed per store
+4. Expires cache after 3 days
+5. Handles large data (thousands of products) efficiently
+
+---
+
+**Architecture decision — split storage:**
+
+`chrome.storage.local` for lightweight metadata per store (everything except `products` and `collections`). This is synchronous-feeling, fast, and perfect for small objects.
+
+`IndexedDB` for large arrays (`products` and `collections`). These can be tens of thousands of records and must not bloat `chrome.storage.local`.
+
+---
+
+**Step 1 — Identify current store on popup open**
+
+On popup open, before rendering anything, inject a content script into the active tab to read `window.Shopify.shop`:
+
+```javascript
+// popup.js — runs immediately on popup open
+async function getCurrentShopDomain() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const result = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.Shopify?.shop ?? null,
+  });
+  return result[0]?.result ?? null;
+}
+```
+
+This gives you the canonical shop domain (e.g. `aedev.myshopify.com`) for the active tab. Use this as the key for everything.
+
+---
+
+**Step 2 — Storage schema**
+
+`chrome.storage.local` — one entry per store, key = shop domain:
+
+```javascript
+// Key: "store:aedev.myshopify.com"
+{
+  domain:              "aedev.myshopify.com",
+  storeName:           "Gifts With Humanity",
+  detectedAt:          1777062483388,
+  cachedAt:            1777062483388,   // timestamp of last cache write
+  theme:               { ... },
+  themeNormalized:     { ... },
+  themeRenamed:        "...",
+  themeSchemaName:     "...",
+  themeSchemaVersion:  "...",
+  shopMeta:            { ... },
+  storeContacts:       { ... },
+  productCount:        1268,
+  collectionCount:     117,
+  catalogLoading:      false,
+  catalogFullDataInIndexedDb: true,   // flag: large data is in IDB
+}
+```
+
+`IndexedDB` — two object stores:
+
+```javascript
+// DB name: "SpyKitDB", version 1
+
+// Object store: "products"
+// keyPath: "id"
+// indexes: ["domain", "vendor", "product_type", ["domain", "product_type"]]
+{
+  id:           8107683578109,
+  domain:       "aedev.myshopify.com",
+  cachedAt:     1777062483388,
+  ...productFields
+}
+
+// Object store: "collections"
+// keyPath: "id"
+// indexes: ["domain"]
+{
+  id:           123456,
+  domain:       "aedev.myshopify.com",
+  cachedAt:     1777062483388,
+  ...collectionFields
+}
+```
+
+---
+
+**Step 3 — Cache expiry**
+
+3 days in ms = `3 * 24 * 60 * 60 * 1000 = 259200000`
+
+```javascript
+function isCacheExpired(cachedAt) {
+  return !cachedAt || (Date.now() - cachedAt) > 259200000;
+}
+```
+
+---
+
+**Step 4 — Full implementation to write**
+
+Write these functions:
+
+```javascript
+// ── INIT ─────────────────────────────────────────────
+// Call this the moment popup opens, before any render
+async function initStoreData() {
+  const domain = await getCurrentShopDomain();
+  if (!domain) return null;
+
+  const cached = await loadStoreData(domain);
+
+  if (cached && !isCacheExpired(cached.cachedAt)) {
+    // Load lightweight meta instantly
+    window.storeData = cached;
+    // Load heavy data from IDB in background
+    window.storeData.products = await getProductsFromIDB(domain);
+    window.storeData.collections = await getCollectionsFromIDB(domain);
+    return window.storeData;
+  }
+
+  // Cache miss or expired — return null, trigger fresh detection
+  return null;
+}
+
+// ── SAVE ─────────────────────────────────────────────
+async function saveStoreData(storeData) {
+  const domain = storeData.domain;
+  const cachedAt = Date.now();
+
+  // Save lightweight meta to chrome.storage.local
+  const { products, collections, ...meta } = storeData;
+  await chrome.storage.local.set({
+    [`store:${domain}`]: { ...meta, cachedAt, catalogFullDataInIndexedDb: true }
+  });
+
+  // Save products + collections to IndexedDB
+  if (products?.length) await saveProductsToIDB(domain, products, cachedAt);
+  if (collections?.length) await saveCollectionsToIDB(domain, collections, cachedAt);
+}
+
+// ── LOAD META ─────────────────────────────────────────
+async function loadStoreData(domain) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(`store:${domain}`, result => {
+      resolve(result[`store:${domain}`] ?? null);
+    });
+  });
+}
+
+// ── INDEXEDDB SETUP ───────────────────────────────────
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('SpyKitDB', 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+
+      if (!db.objectStoreNames.contains('products')) {
+        const ps = db.createObjectStore('products', { keyPath: 'id' });
+        ps.createIndex('by_domain',      'domain',       { unique: false });
+        ps.createIndex('by_vendor',      'vendor',       { unique: false });
+        ps.createIndex('by_type',        'product_type', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains('collections')) {
+        const cs = db.createObjectStore('collections', { keyPath: 'id' });
+        cs.createIndex('by_domain', 'domain', { unique: false });
+      }
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+// ── IDB WRITE ─────────────────────────────────────────
+async function saveProductsToIDB(domain, products, cachedAt) {
+  const db = await openDB();
+  const tx = db.transaction('products', 'readwrite');
+  const store = tx.objectStore('products');
+  for (const product of products) {
+    store.put({ ...product, domain, cachedAt });
+  }
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function saveCollectionsToIDB(domain, collections, cachedAt) {
+  const db = await openDB();
+  const tx = db.transaction('collections', 'readwrite');
+  const store = tx.objectStore('collections');
+  for (const col of collections) {
+    store.put({ ...col, domain, cachedAt });
+  }
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+// ── IDB READ ──────────────────────────────────────────
+async function getProductsFromIDB(domain) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('products', 'readonly');
+    const index = tx.objectStore('products').index('by_domain');
+    const req   = index.getAll(domain);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function getCollectionsFromIDB(domain) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('collections', 'readonly');
+    const index = tx.objectStore('collections').index('by_domain');
+    const req   = index.getAll(domain);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+// ── CLEAR EXPIRED ─────────────────────────────────────
+// Run this on popup open to clean up old stores
+async function clearExpiredStores() {
+  const TTL = 259200000;
+  const all = await new Promise(resolve =>
+    chrome.storage.local.get(null, resolve)
+  );
+  const expiredKeys = [];
+  const expiredDomains = [];
+
+  for (const [key, val] of Object.entries(all)) {
+    if (key.startsWith('store:') && isCacheExpired(val.cachedAt)) {
+      expiredKeys.push(key);
+      expiredDomains.push(val.domain);
+    }
+  }
+
+  if (expiredKeys.length) {
+    await chrome.storage.local.remove(expiredKeys);
+    // Also purge from IDB
+    for (const domain of expiredDomains) {
+      await deleteStoreFromIDB(domain);
+    }
+  }
+}
+
+async function deleteStoreFromIDB(domain) {
+  const db = await openDB();
+  for (const storeName of ['products', 'collections']) {
+    const tx    = db.transaction(storeName, 'readwrite');
+    const index = tx.objectStore(storeName).index('by_domain');
+    const req   = index.getAllKeys(domain);
+    req.onsuccess = e => {
+      for (const key of e.target.result) {
+        tx.objectStore(storeName).delete(key);
+      }
+    };
+  }
+}
+
+// ── RE-SCRAPE BUTTON ──────────────────────────────────
+async function reScrape() {
+  const domain = await getCurrentShopDomain();
+  // Remove from chrome.storage.local
+  await chrome.storage.local.remove(`store:${domain}`);
+  // Remove from IDB
+  await deleteStoreFromIDB(domain);
+  // Trigger fresh detection
+  window.storeData = {};
+  await runDetection(); // your existing detection function
+}
+```
+
+---
+
+**Step 5 — Popup entry point**
+
+```javascript
+// popup.js entry point
+document.addEventListener('DOMContentLoaded', async () => {
+  await clearExpiredStores();
+
+  const cached = await initStoreData();
+
+  if (cached) {
+    renderUI(window.storeData);   // instant render from cache
+  } else {
+    showLoadingState();
+    await runDetection();         // fresh scrape
+    await saveStoreData(window.storeData);
+    renderUI(window.storeData);
+  }
+});
+```
+
+---
+
+**Key points for your LLM:**
+- `getCurrentShopDomain()` runs first, before any render, keyed to the active tab
+- Never use tab ID or URL as the key, always use `window.Shopify.shop` which is the canonical store identifier
+- `chrome.storage.local` holds only lightweight metadata, never arrays of products
+- IndexedDB holds products and collections, each record tagged with `domain` and `cachedAt`
+- `saveStoreData` destructures products/collections out before saving to `chrome.storage.local`
+- `initStoreData` loads meta first (fast), then loads IDB data (slightly slower but non-blocking)
+- `clearExpiredStores` runs on every popup open but is cheap since it only reads keys

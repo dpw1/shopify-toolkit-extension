@@ -1,43 +1,80 @@
 import { useEffect, useState } from 'react'
-import type { ExtMessage, StoreInfo } from '../../types'
+import type { CatalogCollectionRow, CatalogProductRow, StoreInfo } from '../../types'
 import { onStorageChange } from '../../lib/storage'
+import { loadPopupStoreBundle } from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
 
-export function useStoreInfo() {
+/**
+ * Loads store snapshot for the active tab into React state + `window.storeData`.
+ *
+ * Flow is centralized in `../lib/popupStoreLoader.ts` (`loadPopupStoreBundle`):
+ * resolve `Shopify.shop` / `/meta.json` → read `storeCacheByDomain` → read IDB
+ * → optionally kick off background catalog sync.
+ *
+ * `products` and `collections` are surfaced as their own state — NOT derived
+ * from `storeInfo.productsSample` — so ScraperPage always receives the IDB
+ * arrays the moment they are available, without depending on useMemo chains.
+ */
+export function useStoreInfo(): {
+  storeInfo: StoreInfo | null
+  storeInfoLoaded: boolean
+  products: CatalogProductRow[]
+  collections: CatalogCollectionRow[]
+} {
   const [storeInfo, setStoreInfo] = useState<StoreInfo | null>(null)
+  const [storeInfoLoaded, setStoreInfoLoaded] = useState(false)
+  const [products, setProducts] = useState<CatalogProductRow[]>([])
+  const [collections, setCollections] = useState<CatalogCollectionRow[]>([])
 
   useEffect(() => {
-    syncPopupStoreData(storeInfo)
-  }, [storeInfo])
+    let cancelled = false
 
-  useEffect(() => {
-    try {
-      chrome.runtime.sendMessage(
-        { type: 'GET_STORE_INFO', from: 'popup' } satisfies ExtMessage,
-        (res: ExtMessage | undefined) => {
-          if (chrome.runtime.lastError) return
-          if (res?.type === 'STORE_INFO_RESPONSE') {
-            setStoreInfo(res.payload)
-            const hasCatalog =
-              Array.isArray(res.payload?.productsSample) && res.payload.productsSample.length > 0
-            // Use cached storeInfo/window.storeData by default.
-            // Only fetch when no catalog exists yet.
-            if (!hasCatalog) {
-              chrome.runtime.sendMessage(
-                { type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage,
-              )
-            }
-          }
-        },
-      )
-    } catch {
-      /* not running as extension */
+    async function applyBundle(si: StoreInfo | null) {
+      await syncPopupStoreData(si)
+      // After syncPopupStoreData, window.storeData is the IDB source of truth.
+      // Mirror the same arrays into explicit React state so ScraperPage is
+      // driven by these — no useMemo chain, no stale-reference risk.
+      const p = window.storeData?.products ?? []
+      const c = window.storeData?.collections ?? []
+      if (!cancelled) {
+        setProducts(p)
+        setCollections(c)
+        setStoreInfo(si)
+      }
     }
 
-    return onStorageChange('storeInfo', (nv) => {
-      setStoreInfo(nv ?? null)
+    async function runLoad() {
+      const bundle = await loadPopupStoreBundle()
+      if (cancelled) return
+      await applyBundle(bundle?.storeInfo ?? null)
+      if (!cancelled) setStoreInfoLoaded(true)
+    }
+
+    void runLoad()
+
+    const unsub = onStorageChange('storeCacheByDomain', () => {
+      void (async () => {
+        const bundle = await loadPopupStoreBundle()
+        if (cancelled) return
+        if (bundle) await applyBundle(bundle.storeInfo)
+      })()
     })
+
+    // DevTools: await window.spykitLoadStore()
+    ;(window as unknown as { spykitLoadStore?: () => Promise<StoreInfo | null> }).spykitLoadStore =
+      async () => {
+        const bundle = await loadPopupStoreBundle()
+        if (bundle) await applyBundle(bundle.storeInfo)
+        return bundle?.storeInfo ?? null
+      }
+
+    return () => {
+      cancelled = true
+      unsub()
+      delete (window as unknown as { spykitLoadStore?: () => Promise<StoreInfo | null> })
+        .spykitLoadStore
+    }
   }, [])
 
-  return storeInfo
+  return { storeInfo, storeInfoLoaded, products, collections }
 }

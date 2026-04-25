@@ -10,19 +10,20 @@ export const POPUP_SETTINGS_VERSION = 1
 
 const LOCAL_FALLBACK_KEY = 'spykit-popup-settings'
 
-const VALID_PAGES: PopupPageId[] = ['stores', 'theme', 'apps', 'scraper', 'downloads', 'export']
+const VALID_PAGES: PopupPageId[] = ['store', 'theme', 'apps', 'scraper', 'downloads', 'export']
 
-/** Persisted tab id was renamed from `overview` → `stores`. */
+/** Persisted tab id was renamed: `overview` → `stores` → `store`. */
 function normalizeActiveTabId(v: unknown): PopupPageId | undefined {
   if (typeof v !== 'string') return undefined
-  const id = v === 'overview' ? 'stores' : v
+  let id = v
+  if (id === 'overview' || id === 'stores') id = 'store'
   return (VALID_PAGES as string[]).includes(id) ? (id as PopupPageId) : undefined
 }
 
 export const DEFAULT_POPUP_SETTINGS: PopupSettings = {
   settingsVersion: POPUP_SETTINGS_VERSION,
   theme: 'light',
-  activeTab: 'stores',
+  activeTab: 'store',
   scrollY: 0,
   scraperView: 'products',
   scraperPage: 1,

@@ -18,6 +18,18 @@ function log(...args: unknown[]) {
   if (IS_DEV) console.log('[SpyKit CS]', ...args)
 }
 
+function toastFromContent(message: string) {
+  try {
+    void chrome.runtime.sendMessage({
+      type: 'SPYKIT_TOAST',
+      from: 'content',
+      payload: { message },
+    } satisfies ExtMessage)
+  } catch {
+    /* popup closed / runtime unavailable */
+  }
+}
+
 // ─── Shopify detection ───────────────────────────────────────────────────────
 
 function isShopify(): boolean {
@@ -34,19 +46,38 @@ function isShopify(): boolean {
   return false
 }
 
+// ─── Canonical domain ─────────────────────────────────────────────────────────
+
+/**
+ * The canonical store identifier — set to `shopMeta.myshopify_domain` once
+ * `/meta.json` loads (gives `aedev.myshopify.com` even on custom domains),
+ * falling back to `location.hostname`.  All background messages use this key
+ * so they land in the same `storeCacheByDomain` slot regardless of which URL
+ * variant the user opened.
+ */
+let canonicalDomain: string = location.hostname
+
 // ─── Page-world injection ────────────────────────────────────────────────────
 
 /** Shopify exposes shop metadata at the storefront root: `/meta.json`. */
 async function fetchAndSendShopMeta(): Promise<void> {
   try {
+    toastFromContent('Fetching meta.json…')
     const url = new URL('/meta.json', location.href).href
     const res = await fetch(url, { credentials: 'same-origin' })
     if (!res.ok) return
     const shopMeta = (await res.json()) as ShopMetaJson
+
+    // Use myshopify_domain as the canonical key — consistent across custom domains
+    canonicalDomain =
+      typeof shopMeta.myshopify_domain === 'string' && shopMeta.myshopify_domain.trim()
+        ? shopMeta.myshopify_domain.trim().toLowerCase()
+        : location.hostname
+
     chrome.runtime.sendMessage({
       type: 'SHOP_META',
       from: 'content',
-      payload: { domain: location.hostname, shopMeta },
+      payload: { domain: canonicalDomain, shopMeta },
     } satisfies ExtMessage)
   } catch {
     /* non-Shopify theme, offline, CORS edge, etc. */
@@ -107,11 +138,13 @@ function collectStoreContacts(): StoreContacts {
 
 function sendStoreContacts() {
   try {
+    toastFromContent('Scanning social links & emails…')
     const contacts = collectStoreContacts()
+    // Use the same canonical domain that SHOP_META used (set after /meta.json loads)
     chrome.runtime.sendMessage({
       type: 'STORE_CONTACTS',
       from: 'content',
-      payload: { domain: location.hostname, contacts },
+      payload: { domain: canonicalDomain, contacts },
     } satisfies ExtMessage)
     log('Sent STORE_CONTACTS', { emails: contacts.emails.length, socials: Object.keys(contacts.social) })
   } catch {

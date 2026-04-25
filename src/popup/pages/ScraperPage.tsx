@@ -6,6 +6,7 @@ import {
   PaginatedTable,
   type PerPage,
 } from '../components/PaginatedTable'
+import { emitSpykitToast } from '../lib/spykitToastBus'
 import './productsTab.css'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -328,6 +329,9 @@ function FilterModal({
 
 type Props = {
   storeInfo: StoreInfo | null
+  /** Catalog rows from IndexedDB — set as first-class state in useStoreInfo. */
+  products: CatalogProductRow[]
+  collections: CatalogCollectionRow[]
   initialView?: 'products' | 'collections'
   initialPage?: number
   initialSearch?: string
@@ -350,6 +354,8 @@ type Props = {
 
 export default function ScraperPage({
   storeInfo,
+  products: storeProducts,
+  collections: storeCollections,
   initialView = 'products',
   initialPage = 1,
   initialSearch = '',
@@ -360,12 +366,6 @@ export default function ScraperPage({
   initialPerPage = 10,
   onPersistViewState,
 }: Props) {
-  const [storeProducts, setStoreProducts] = useState<CatalogProductRow[]>(
-    window.storeData?.products ?? [],
-  )
-  const [storeCollections, setStoreCollections] = useState<CatalogCollectionRow[]>(
-    window.storeData?.collections ?? [],
-  )
 
   const [search, setSearch] = useState(initialSearch)
   const [stockFilter, setStockFilter] = useState<StockFilter>(initialStockFilter)
@@ -377,12 +377,6 @@ export default function ScraperPage({
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState<PerPage>(initialPerPage)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-
-  // Sync from storeData whenever storeInfo changes (background wrote new data)
-  useEffect(() => {
-    setStoreProducts(window.storeData?.products ?? [])
-    setStoreCollections(window.storeData?.collections ?? [])
-  }, [storeInfo?.detectedAt, storeInfo?.productsSample, storeInfo?.collectionsSample])
 
   // Parent may switch sub-view (e.g. Overview → Collections stat opens Products tab on collections).
   useEffect(() => {
@@ -559,6 +553,7 @@ export default function ScraperPage({
 
   function onReSync() {
     try {
+      emitSpykitToast('Re-syncing catalog…')
       chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
     } catch { /* no-op */ }
   }
@@ -586,6 +581,18 @@ export default function ScraperPage({
   // Only stop skeletons when loading is explicitly false and we still have no products.
   const showLoadingRows = storeProducts.length === 0 && storeInfo?.catalogLoading !== false
 
+  const catalogWaitToastFired = useRef(false)
+  useEffect(() => {
+    if (!showLoadingRows) {
+      catalogWaitToastFired.current = false
+      return
+    }
+    if (mainView !== 'products') return
+    if (catalogWaitToastFired.current) return
+    catalogWaitToastFired.current = true
+    emitSpykitToast('Catalog sync in progress — keep this popup open.')
+  }, [showLoadingRows, mainView])
+
   // Delay the "no products" empty message slightly to avoid a 1-frame flash
   // between skeletons disappearing and data rows appearing.
   const [showEmptyMessage, setShowEmptyMessage] = useState(false)
@@ -597,6 +604,18 @@ export default function ScraperPage({
     const t = setTimeout(() => setShowEmptyMessage(true), 300)
     return () => clearTimeout(t)
   }, [showLoadingRows, storeProducts.length])
+
+  const emptyHintToastFired = useRef(false)
+  useEffect(() => {
+    if (!showEmptyMessage || showLoadingRows || pageItems.length > 0) {
+      emptyHintToastFired.current = false
+      return
+    }
+    if (mainView !== 'products') return
+    if (emptyHintToastFired.current) return
+    emptyHintToastFired.current = true
+    emitSpykitToast('Waiting for products — catalog may still be syncing.')
+  }, [showEmptyMessage, showLoadingRows, mainView, pageItems.length])
 
   // Shared pagination strip props
   return (

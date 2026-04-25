@@ -1,15 +1,13 @@
 /**
  * Background service worker (ES module).
  *
- * Responsibilities:
- *  - Receive store detection signals from content scripts
- *  - Fetch Shopify JSON endpoints (products, collections, theme metadata)
- *  - Persist results via chrome.storage / IndexedDB lib
- *  - Forward progress updates to the popup via chrome.runtime.sendMessage
+ * Storage architecture:
+ *  - chrome.storage.local["storeCacheByDomain"][domain] → StoreCacheMeta (lightweight, no arrays)
+ *  - IndexedDB "products"    → records tagged with {domain, cachedAt}, queryable by by_domain index
+ *  - IndexedDB "collections" → same
  *
- * SW lifetime: Chrome may suspend the SW between events. For long-running
- * fetches, use an offscreen document + a periodic message back to the SW
- * to extend its lifetime (see keepAlive pattern below).
+ * This prevents chrome.storage.local bloat from large product arrays and keeps
+ * per-store data fully isolated, even across multiple open Shopify tabs.
  */
 
 import type {
@@ -19,13 +17,16 @@ import type {
   PopupSettings,
   ShopifyApp,
   ShopifyTheme,
+  StoreCacheMeta,
   StoreInfo,
 } from '../types'
+import { CACHE_TTL_MS } from '../types'
+import { resolveShopDomainInPage } from '../lib/injected/resolveShopDomain'
+import { normalizeStoreDomainKey } from '../lib/storeDomain'
 import { storageGet, storageSet } from '../lib/storage'
 import {
-  dbPutMany,
-  dbClear,
-  dbGetAll,
+  dbPutManyTagged,
+  dbDeleteByDomain,
   STORE_PRODUCTS,
   STORE_COLLECTIONS,
 } from '../lib/db'
@@ -49,23 +50,26 @@ async function sendToPopup(msg: ExtMessage) {
   }
 }
 
+function toastPopup(message: string) {
+  // `chrome.runtime.sendMessage` from the service worker often does not reach an
+  // open popup. Storage `onChanged` is reliable for cross-context UI toasts.
+  void storageSet({ spykitToast: { message, at: Date.now() } })
+}
+
 /** Turn injected-script partial theme into persisted `ShopifyTheme`. */
 function normalizeThemePayload(raw: Partial<ShopifyTheme> | undefined): ShopifyTheme | null {
   if (!raw || Object.keys(raw).length === 0) return null
 
-  /** `Shopify.theme.schema_name` — never use `Shopify.theme.name` here. */
   const name =
     raw.schemaName != null && String(raw.schemaName).trim()
       ? String(raw.schemaName).trim()
       : 'Unknown'
 
-  /** `Shopify.theme.schema_version` only (ignore a wrong `version` on stale payloads). */
   const version =
     raw.schemaVersion != null && String(raw.schemaVersion).trim()
       ? String(raw.schemaVersion).trim()
       : ''
 
-  /** `Shopify.theme.name` — migrate old `themeRename` key from storage. */
   const themeRenamed =
     raw.themeRenamed != null && String(raw.themeRenamed).trim()
       ? String(raw.themeRenamed).trim()
@@ -84,58 +88,241 @@ function normalizeThemePayload(raw: Partial<ShopifyTheme> | undefined): ShopifyT
   }
 }
 
-// ─── Scrape orchestration ─────────────────────────────────────────────────────
+// ─── Per-store cache helpers ──────────────────────────────────────────────────
 
-/** Narrow shape used when mapping scrape rows into IDB. */
-interface ScrapeProductJson {
-  products: Array<{
-    id: number
-    title: string
-    handle: string
-    body_html: string
-    vendor: string
-    product_type: string
-    variants: Array<{ id: number; price: string; sku: string }>
-    images: Array<{ src: string }>
-  }>
+/**
+ * Build a `StoreCacheMeta` from a legacy `StoreInfo` (migration helper).
+ * Products / collections are intentionally dropped — they now live in IDB.
+ */
+function storeInfoToMeta(info: StoreInfo, key: string): StoreCacheMeta {
+  return {
+    domain: info.domain || key,
+    storeName: info.storeName,
+    detectedAt: info.detectedAt || Date.now(),
+    cachedAt: info.cachedAt ?? Date.now(),
+    theme: info.theme,
+    shopifyThemeRaw: info.shopifyThemeRaw,
+    shopMeta: info.shopMeta,
+    storeContacts: info.storeContacts,
+    apps: info.apps ?? [],
+    productCount: info.productCount ?? 0,
+    collectionCount: info.collectionCount ?? 0,
+    catalogLoading: info.catalogLoading,
+    catalogFullDataInIndexedDb: info.catalogFullDataInIndexedDb ?? false,
+  }
 }
 
-type JsonProductRow = Record<string, unknown> & { id: number }
-type JsonCollectionRow = Record<string, unknown> & { id: number }
-
-interface StorefrontProductsPageJson {
-  products?: JsonProductRow[]
-}
-
-interface StorefrontCollectionsPageJson {
-  collections?: JsonCollectionRow[]
+/** Convert a `StoreCacheMeta` into the `StoreInfo` shape the popup expects. */
+function metaToStoreInfo(meta: StoreCacheMeta): StoreInfo {
+  return {
+    domain: meta.domain,
+    storeName: meta.storeName,
+    theme: meta.theme,
+    shopifyThemeRaw: meta.shopifyThemeRaw,
+    shopMeta: meta.shopMeta,
+    storeContacts: meta.storeContacts,
+    apps: meta.apps,
+    productCount: meta.productCount,
+    collectionCount: meta.collectionCount,
+    detectedAt: meta.detectedAt,
+    cachedAt: meta.cachedAt,
+    catalogLoading: meta.catalogLoading,
+    catalogFullDataInIndexedDb: meta.catalogFullDataInIndexedDb,
+    // productsSample / collectionsSample intentionally omitted — popup reads IDB directly
+  }
 }
 
 /**
- * Paginate `{origin}/products.json?limit=250&page=N` (and collections) from the extension context.
- * Logs each page to the service worker console.
+ * Load the full `storeCacheByDomain` map, migrating legacy storage shapes on
+ * the first call so old installs see their data without re-scraping.
+ */
+async function loadCacheMap(): Promise<Record<string, StoreCacheMeta>> {
+  const { storeCacheByDomain, storeInfoByHost, storeInfo } = await storageGet([
+    'storeCacheByDomain',
+    'storeInfoByHost',
+    'storeInfo',
+  ])
+
+  if (storeCacheByDomain) return { ...storeCacheByDomain }
+
+  // Migrate from storeInfoByHost (previous session's schema)
+  if (storeInfoByHost && Object.keys(storeInfoByHost).length > 0) {
+    const migrated: Record<string, StoreCacheMeta> = {}
+    for (const [key, info] of Object.entries(storeInfoByHost)) {
+      migrated[key] = storeInfoToMeta(info, key)
+    }
+    await storageSet({ storeCacheByDomain: migrated })
+    return migrated
+  }
+
+  // Migrate from legacy single-slot storeInfo
+  if (storeInfo) {
+    const key = normalizeStoreDomainKey(storeInfo.domain)
+    const migrated: Record<string, StoreCacheMeta> = {
+      [key]: storeInfoToMeta(storeInfo, key),
+    }
+    await storageSet({ storeCacheByDomain: migrated })
+    return migrated
+  }
+
+  return {}
+}
+
+/**
+ * Find cached store metadata when the popup's host hint does not match the
+ * map key (e.g. `www.shop.com` vs `shop.myshopify.com`).
+ */
+function findCacheMetaByHostHint(
+  map: Record<string, StoreCacheMeta>,
+  hint: string,
+): StoreCacheMeta | null {
+  const k = normalizeStoreDomainKey(hint)
+  const direct = map[k]
+  if (direct) return direct
+
+  for (const meta of Object.values(map)) {
+    const canon = normalizeStoreDomainKey(meta.domain)
+    if (canon === k) return meta
+
+    const my = meta.shopMeta?.myshopify_domain
+    if (my && normalizeStoreDomainKey(my) === k) return meta
+
+    const shopDom = meta.shopMeta?.domain
+    if (shopDom && normalizeStoreDomainKey(shopDom) === k) return meta
+
+    const urlStr = meta.shopMeta?.url
+    if (urlStr) {
+      try {
+        const uh = normalizeStoreDomainKey(new URL(urlStr).hostname)
+        if (uh === k) return meta
+      } catch {
+        /* ignore bad URL */
+      }
+    }
+  }
+
+  return null
+}
+
+/** Merge updated fields into a domain's cache entry and persist. */
+async function saveCacheMeta(
+  domain: string,
+  update: Partial<StoreCacheMeta>,
+  base?: StoreCacheMeta | null,
+): Promise<void> {
+  const key = normalizeStoreDomainKey(domain)
+  const map = await loadCacheMap()
+  const existing = base ?? map[key]
+
+  // Use Object.assign to avoid TS2783 "duplicate keys" on spread-then-override pattern
+  const defaults: StoreCacheMeta = {
+    domain: key,
+    detectedAt: Date.now(),
+    cachedAt: Date.now(),
+    theme: null,
+    apps: [],
+    productCount: 0,
+    collectionCount: 0,
+    catalogFullDataInIndexedDb: false,
+  }
+  map[key] = Object.assign({}, defaults, existing ?? {}, update) as StoreCacheMeta
+  await storageSet({ storeCacheByDomain: map })
+}
+
+/**
+ * Remove cache entries older than `CACHE_TTL_MS` from both
+ * chrome.storage.local and IndexedDB.  Runs cheaply on SW startup.
+ */
+async function clearExpiredStores(): Promise<void> {
+  const { storeCacheByDomain } = await storageGet(['storeCacheByDomain'])
+  if (!storeCacheByDomain) return
+
+  const now = Date.now()
+  const fresh: Record<string, StoreCacheMeta> = {}
+  const expiredDomains: string[] = []
+
+  for (const [key, meta] of Object.entries(storeCacheByDomain)) {
+    if (now - (meta.cachedAt ?? 0) > CACHE_TTL_MS) {
+      expiredDomains.push(meta.domain ?? key)
+    } else {
+      fresh[key] = meta
+    }
+  }
+
+  if (expiredDomains.length > 0) {
+    await storageSet({ storeCacheByDomain: fresh })
+    for (const d of expiredDomains) {
+      try {
+        await dbDeleteByDomain(STORE_PRODUCTS, d)
+        await dbDeleteByDomain(STORE_COLLECTIONS, d)
+      } catch {
+        // Non-fatal — IDB may not have records for this domain
+      }
+    }
+    log('Purged expired stores:', expiredDomains)
+  }
+}
+
+/**
+ * Resolve the canonical shop domain for a tab (same logic as the popup loader).
+ */
+async function getCanonicalDomainFromTab(tab: chrome.tabs.Tab): Promise<string | null> {
+  if (!tab.url) return null
+  let urlHostname: string
+  try {
+    const u = new URL(tab.url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    urlHostname = normalizeStoreDomainKey(u.hostname)
+  } catch {
+    return null
+  }
+
+  if (!tab.id) return urlHostname
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: resolveShopDomainInPage,
+    })
+    const v = results[0]?.result
+    if (typeof v === 'string' && v.trim()) return normalizeStoreDomainKey(v)
+  } catch {
+    // Tab may not be injectable (chrome:// pages, etc.)
+  }
+
+  return urlHostname
+}
+
+// ─── Catalog fetching ─────────────────────────────────────────────────────────
+
+interface StorefrontProductsPageJson {
+  products?: Array<Record<string, unknown> & { id: number }>
+}
+interface StorefrontCollectionsPageJson {
+  collections?: Array<Record<string, unknown> & { id: number }>
+}
+
+/**
+ * Paginate `/products.json` and `/collections.json`, then tag each product
+ * with the collection handles it belongs to.  Returns raw rows; the caller is
+ * responsible for writing them to IDB (tagged with domain + cachedAt).
  */
 async function fetchCatalogFromOrigin(origin: string): Promise<{
   productCount: number
-  productsSample: CatalogProductRow[]
+  products: CatalogProductRow[]
   collectionCount: number
-  collectionsSample: CatalogCollectionRow[]
+  collections: CatalogCollectionRow[]
 }> {
-  await dbClear(STORE_PRODUCTS)
-  await dbClear(STORE_COLLECTIONS)
+  toastPopup('Fetching products.json…')
 
-  const productsSample: CatalogProductRow[] = []
-  let productCount = 0
+  const products: CatalogProductRow[] = []
   let page = 1
   while (true) {
     const url = `${origin}/products.json?limit=250&page=${page}`
     console.log('[SpyKit BG] products GET', url)
     let res: Response
     try {
-      res = await fetch(url, {
-        credentials: 'omit',
-        headers: { Accept: 'application/json' },
-      })
+      res = await fetch(url, { credentials: 'omit', headers: { Accept: 'application/json' } })
     } catch (err) {
       console.warn('[SpyKit BG] products fetch error', url, err)
       break
@@ -146,51 +333,40 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
     }
     const data = (await res.json()) as StorefrontProductsPageJson
     const items = data.products ?? []
-    console.log('[SpyKit BG] products page', page, 'count', items.length)
     if (!items.length) break
-    await dbPutMany(STORE_PRODUCTS, items as object[])
-    productsSample.push(...items)
-    productCount += items.length
-    page += 1
+    products.push(...items)
+    page++
     if (items.length < 250) break
   }
 
-  const collectionsSample: CatalogCollectionRow[] = []
-  let collectionCount = 0
+  toastPopup('Fetching collections.json…')
+
+  const collections: CatalogCollectionRow[] = []
   let cPage = 1
   while (true) {
     const url = `${origin}/collections.json?limit=250&page=${cPage}`
     console.log('[SpyKit BG] collections GET', url)
     let res: Response
     try {
-      res = await fetch(url, {
-        credentials: 'omit',
-        headers: { Accept: 'application/json' },
-      })
+      res = await fetch(url, { credentials: 'omit', headers: { Accept: 'application/json' } })
     } catch (err) {
       console.warn('[SpyKit BG] collections fetch error', url, err)
       break
     }
-    if (!res.ok) {
-      console.warn('[SpyKit BG] collections non-OK', res.status, url)
-      break
-    }
+    if (!res.ok) break
     const data = (await res.json()) as StorefrontCollectionsPageJson
     const items = data.collections ?? []
-    console.log('[SpyKit BG] collections page', cPage, 'count', items.length)
     if (!items.length) break
-    await dbPutMany(STORE_COLLECTIONS, items as object[])
-    collectionsSample.push(...items)
-    collectionCount += items.length
-    cPage += 1
+    collections.push(...items)
+    cPage++
     if (items.length < 250) break
   }
 
-  // ── Tag each product with the collection handles it appears in ──────────────
-  // Build a map from product id → array of collection handles by fetching
-  // each collection's /products.json endpoint.
+  toastPopup('Linking products to collections…')
+
+  // Tag each product with the collection handles it appears in
   const productCollectionsMap = new Map<number, string[]>()
-  for (const col of collectionsSample) {
+  for (const col of collections) {
     const handle = String(col.handle ?? '')
     if (!handle) continue
     const productsCount = Number((col as { products_count?: unknown }).products_count ?? 0)
@@ -214,28 +390,33 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
         if (!existing.includes(handle)) existing.push(handle)
         productCollectionsMap.set(p.id, existing)
       }
-      pPage += 1
+      pPage++
       if (colItems.length < 250) break
     }
   }
 
-  // Merge collection tags into products
-  const taggedProducts = productsSample.map((p) => ({
+  const taggedProducts = products.map((p) => ({
     ...p,
     _collections: productCollectionsMap.get(p.id) ?? [],
   }))
 
-  console.log('[SpyKit BG] catalog totals', { productCount, collectionCount })
-  return { productCount, productsSample: taggedProducts, collectionCount, collectionsSample }
+  console.log('[SpyKit BG] catalog totals', { products: products.length, collections: collections.length })
+  return {
+    productCount: taggedProducts.length,
+    products: taggedProducts,
+    collectionCount: collections.length,
+    collections,
+  }
 }
 
 async function syncCatalogFromActiveTab(): Promise<void> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   const tab = tabs[0]
   if (!tab?.url) {
     log('SYNC_CATALOG: no active tab url')
     return
   }
+
   let origin: string
   try {
     const u = new URL(tab.url)
@@ -245,69 +426,73 @@ async function syncCatalogFromActiveTab(): Promise<void> {
     return
   }
 
-  const domainHostname = new URL(origin).hostname
-  const { storeInfo } = await storageGet(['storeInfo'])
+  const domain = await getCanonicalDomainFromTab(tab)
+  if (!domain) return
 
-  const loading: StoreInfo = {
-    domain: storeInfo?.domain ?? domainHostname,
-    storeName: storeInfo?.storeName,
-    shopMeta: storeInfo?.shopMeta,
-    theme: storeInfo?.theme ?? null,
-    apps: storeInfo?.apps ?? [],
-    productCount: storeInfo?.productCount ?? 0,
-    collectionCount: storeInfo?.collectionCount ?? 0,
-    detectedAt: Date.now(),
-    catalogLoading: true,
-    shopifyThemeRaw: storeInfo?.shopifyThemeRaw ?? null,
-    productsSample: storeInfo?.productsSample,
-    collectionsSample: storeInfo?.collectionsSample,
-    catalogFullDataInIndexedDb: storeInfo?.catalogFullDataInIndexedDb,
-  }
-  await storageSet({ storeInfo: loading })
+  const map = await loadCacheMap()
+  const existing = map[normalizeStoreDomainKey(domain)] ?? null
+
+  // Mark as loading
+  await saveCacheMeta(domain, { catalogLoading: true }, existing)
 
   try {
-    const { productCount, productsSample, collectionCount, collectionsSample } =
+    const { productCount, products, collectionCount, collections } =
       await fetchCatalogFromOrigin(origin)
-    await storageSet({
-      storeInfo: {
-        ...loading,
-        domain: domainHostname,
+
+    const cachedAt = Date.now()
+    // Write products + collections to IDB, tagged with domain + cachedAt
+    await dbPutManyTagged(STORE_PRODUCTS, products, domain, cachedAt)
+    await dbPutManyTagged(STORE_COLLECTIONS, collections, domain, cachedAt)
+
+    await saveCacheMeta(
+      domain,
+      {
         productCount,
         collectionCount,
-        productsSample,
-        collectionsSample,
         catalogLoading: false,
         catalogFullDataInIndexedDb: true,
-        detectedAt: Date.now(),
+        cachedAt,
       },
-    })
+      existing,
+    )
+    log('syncCatalog done', { domain, productCount, collectionCount })
+    toastPopup('Catalog sync complete')
   } catch (err) {
     console.error('[SpyKit BG] syncCatalogFromActiveTab', err)
-    await storageSet({
-      storeInfo: {
-        ...loading,
-        catalogLoading: false,
-        catalogFullDataInIndexedDb: false,
-        detectedAt: Date.now(),
-      },
-    })
+    await saveCacheMeta(domain, { catalogLoading: false }, existing)
+    toastPopup('Catalog sync failed')
   }
+}
+
+// ─── Manual scrape (START_SCRAPE) ─────────────────────────────────────────────
+
+interface ScrapeProductJson {
+  products: Array<{
+    id: number
+    title: string
+    handle: string
+    vendor: string
+    product_type: string
+    variants: Array<{ id: number; price: string; sku: string }>
+    images: Array<{ src: string }>
+  }>
 }
 
 async function scrapeProducts(
   domain: string,
   opts: { collectionHandle?: string; slowMode?: boolean },
 ) {
+  toastPopup(opts.collectionHandle ? 'Scraping collection products…' : 'Scraping products…')
+
   const base = `https://${domain}`
   const endpoint = opts.collectionHandle
     ? `${base}/collections/${opts.collectionHandle}/products.json`
     : `${base}/products.json`
 
-  await dbClear(STORE_PRODUCTS)
-
+  const limit = opts.slowMode ? 10 : 250
   let page = 1
   let fetched = 0
-  const limit = opts.slowMode ? 10 : 250
+  const allRows: Array<Record<string, unknown> & { id: number }> = []
 
   while (true) {
     const url = `${endpoint}?limit=${limit}&page=${page}`
@@ -322,19 +507,16 @@ async function scrapeProducts(
 
     if (!data.products?.length) break
 
-    await dbPutMany(
-      STORE_PRODUCTS,
-      data.products.map((p) => ({
-        id: p.id,
-        title: p.title,
-        handle: p.handle,
-        vendor: p.vendor,
-        type: p.product_type,
-        variants: p.variants,
-        images: p.images.map((i) => i.src),
-      })),
-    )
-
+    const rows = data.products.map((p) => ({
+      id: p.id,
+      title: p.title,
+      handle: p.handle,
+      vendor: p.vendor,
+      type: p.product_type,
+      variants: p.variants,
+      images: p.images.map((i) => i.src),
+    }))
+    allRows.push(...rows)
     fetched += data.products.length
     page++
 
@@ -348,193 +530,141 @@ async function scrapeProducts(
     if (opts.slowMode) await new Promise((r) => setTimeout(r, 1500))
   }
 
+  // Persist to IDB with domain tag
+  if (allRows.length > 0) {
+    await dbPutManyTagged(STORE_PRODUCTS, allRows, domain, Date.now())
+  }
+
   return fetched
 }
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener(
-  (rawMsg: unknown, _sender, sendResponse) => {
-    const msg = rawMsg as ExtMessage
+chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) => {
+  const msg = rawMsg as ExtMessage
 
-    if (msg.type === 'STORE_DETECTED') {
-      log('Store detected:', msg.payload.domain)
-      // Lightweight — no async needed for detection signal
-    }
+  if (msg.type === 'SPYKIT_TOAST' && msg.from === 'content') {
+    void storageSet({
+      spykitToast: { message: msg.payload.message, at: Date.now() },
+    })
+    return false
+  }
 
-    if (msg.type === 'PAGE_DATA') {
-      const {
+  if (msg.type === 'STORE_DETECTED') {
+    log('Store detected:', msg.payload.domain)
+  }
+
+  if (msg.type === 'PAGE_DATA') {
+    const { domain, theme: themeRaw, apps, shopifyThemeRaw: rawThemeObj } = msg.payload
+    void (async () => {
+      const key = normalizeStoreDomainKey(domain)
+      const map = await loadCacheMap()
+      const existing = map[key] ?? null
+
+      const theme = normalizeThemePayload(themeRaw)
+      const shopifyThemeRaw = rawThemeObj !== undefined ? rawThemeObj : (existing?.shopifyThemeRaw ?? null)
+      const nameFromShopMeta =
+        existing?.shopMeta && typeof existing.shopMeta.name === 'string'
+          ? existing.shopMeta.name.trim()
+          : ''
+
+      await saveCacheMeta(
         domain,
-        theme: themeRaw,
-        apps,
-        productCount: pc,
-        collectionCount: cc,
-        shopifyThemeRaw: rawThemeObj,
-      } = msg.payload
-      storageGet(['storeInfo']).then(async ({ storeInfo }) => {
-        const theme = normalizeThemePayload(themeRaw)
-        const cl = msg.payload.catalogLoading
-        const catalogLoading =
-          cl === true ? true : cl === false ? false : (storeInfo?.catalogLoading ?? false)
-
-        let productCount = storeInfo?.productCount ?? 0
-        if (typeof pc === 'number') productCount = pc
-
-        let collectionCount = storeInfo?.collectionCount ?? 0
-        if (typeof cc === 'number') collectionCount = cc
-
-        let shopifyThemeRaw = storeInfo?.shopifyThemeRaw ?? null
-        if (rawThemeObj !== undefined) shopifyThemeRaw = rawThemeObj
-
-        const productsSample = storeInfo?.productsSample
-        const collectionsSample = storeInfo?.collectionsSample
-
-        let catalogFullDataInIndexedDb = storeInfo?.catalogFullDataInIndexedDb ?? false
-        if (Array.isArray(productsSample) && productsSample.length > 0) catalogFullDataInIndexedDb = true
-
-        const shopMetaKept = storeInfo?.shopMeta ?? undefined
-        const nameFromShopMeta =
-          shopMetaKept && typeof shopMetaKept.name === 'string' ? shopMetaKept.name.trim() : ''
-        const storeName = nameFromShopMeta || storeInfo?.storeName
-
-        const info: StoreInfo = {
-          domain,
-          storeName,
+        {
+          domain: key,
           theme,
           apps: apps as ShopifyApp[],
-          productCount,
-          collectionCount,
-          catalogLoading,
           shopifyThemeRaw,
-          productsSample,
-          collectionsSample,
-          catalogFullDataInIndexedDb,
-          shopMeta: shopMetaKept,
+          storeName: nameFromShopMeta || existing?.storeName,
           detectedAt: Date.now(),
-        }
-        await storageSet({ storeInfo: info })
-        log('Stored page data for', domain, {
-          products: info.productCount,
-          collections: info.collectionCount,
-          theme: theme?.name,
-          catalogLoading: info.catalogLoading,
-        })
-      })
-    }
+          cachedAt: existing?.cachedAt ?? Date.now(),
+        },
+        existing,
+      )
+      log('Stored PAGE_DATA for', key, { theme: theme?.name })
+    })()
+  }
 
-    if (msg.type === 'SHOP_META') {
-      const { domain: metaDomain, shopMeta } = msg.payload
-      storageGet(['storeInfo']).then(async ({ storeInfo }) => {
-        const domain = metaDomain || storeInfo?.domain || ''
-        const nameFromJson =
-          shopMeta && typeof shopMeta.name === 'string' ? shopMeta.name.trim() : ''
-        const info: StoreInfo = {
-          domain,
-          theme: storeInfo?.theme ?? null,
-          apps: storeInfo?.apps ?? [],
-          productCount: storeInfo?.productCount ?? 0,
-          collectionCount: storeInfo?.collectionCount ?? 0,
-          catalogLoading: storeInfo?.catalogLoading,
-          shopifyThemeRaw: storeInfo?.shopifyThemeRaw ?? null,
-          productsSample: storeInfo?.productsSample,
-          collectionsSample: storeInfo?.collectionsSample,
-          catalogFullDataInIndexedDb: storeInfo?.catalogFullDataInIndexedDb ?? false,
+  if (msg.type === 'SHOP_META') {
+    const { domain, shopMeta } = msg.payload
+    void (async () => {
+      const key = normalizeStoreDomainKey(domain)
+      const map = await loadCacheMap()
+      const existing = map[key] ?? null
+      const nameFromJson =
+        shopMeta && typeof shopMeta.name === 'string' ? shopMeta.name.trim() : ''
+
+      await saveCacheMeta(
+        domain,
+        {
           shopMeta,
-          storeName: nameFromJson || storeInfo?.storeName,
-          detectedAt: Date.now(),
-        }
-        await storageSet({ storeInfo: info })
-        log('Stored shop meta.json for', domain, { name: info.storeName })
-      })
-    }
+          storeName: nameFromJson || existing?.storeName,
+          cachedAt: existing?.cachedAt ?? Date.now(),
+        },
+        existing,
+      )
+      log('Stored SHOP_META for', key, { name: nameFromJson })
+    })()
+  }
 
-    if (msg.type === 'STORE_CONTACTS') {
-      const { domain: contactsDomain, contacts } = msg.payload
-      storageGet(['storeInfo']).then(async ({ storeInfo }) => {
-        const domain = contactsDomain || storeInfo?.domain || ''
-        const info: StoreInfo = {
-          domain,
-          theme: storeInfo?.theme ?? null,
-          apps: storeInfo?.apps ?? [],
-          productCount: storeInfo?.productCount ?? 0,
-          collectionCount: storeInfo?.collectionCount ?? 0,
-          catalogLoading: storeInfo?.catalogLoading,
-          shopifyThemeRaw: storeInfo?.shopifyThemeRaw ?? null,
-          productsSample: storeInfo?.productsSample,
-          collectionsSample: storeInfo?.collectionsSample,
-          catalogFullDataInIndexedDb: storeInfo?.catalogFullDataInIndexedDb ?? false,
-          shopMeta: storeInfo?.shopMeta,
-          storeName: storeInfo?.storeName,
-          storeContacts: contacts,
-          detectedAt: storeInfo?.detectedAt ?? Date.now(),
-        }
-        await storageSet({ storeInfo: info })
-        log('Stored store contacts for', domain, {
-          emails: contacts.emails.length,
-          socials: Object.keys(contacts.social).length,
-        })
+  if (msg.type === 'STORE_CONTACTS') {
+    const { domain, contacts } = msg.payload
+    void (async () => {
+      const key = normalizeStoreDomainKey(domain)
+      const map = await loadCacheMap()
+      const existing = map[key] ?? null
+      await saveCacheMeta(
+        domain,
+        { storeContacts: contacts, cachedAt: existing?.cachedAt ?? Date.now() },
+        existing,
+      )
+      log('Stored STORE_CONTACTS for', key, {
+        emails: contacts.emails.length,
+        socials: Object.keys(contacts.social).length,
       })
-    }
+    })()
+  }
 
-    if (msg.type === 'GET_STORE_INFO') {
-      storageGet(['storeInfo']).then(({ storeInfo }) => {
-        sendResponse({
-          type: 'STORE_INFO_RESPONSE',
+  if (msg.type === 'GET_STORE_INFO') {
+    const requestedHost = msg.payload?.host
+    void (async () => {
+      if (!requestedHost) {
+        sendResponse({ type: 'STORE_INFO_RESPONSE', from: 'background', payload: null } satisfies ExtMessage)
+        return
+      }
+      const map = await loadCacheMap()
+      const meta = findCacheMetaByHostHint(map, requestedHost)
+      sendResponse({
+        type: 'STORE_INFO_RESPONSE',
+        from: 'background',
+        payload: meta ? metaToStoreInfo(meta) : null,
+      } satisfies ExtMessage)
+    })()
+    return true // async response
+  }
+
+  if (msg.type === 'SYNC_CATALOG_ON_POPUP') {
+    void syncCatalogFromActiveTab().catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
+  }
+
+  if (msg.type === 'START_SCRAPE') {
+    const { domain, collectionHandle, slowMode } = msg.payload
+    scrapeProducts(domain, { collectionHandle, slowMode })
+      .then(async (count) => {
+        await saveCacheMeta(domain, { productCount: count })
+        await sendToPopup({
+          type: 'SCRAPE_COMPLETE',
           from: 'background',
-          payload: storeInfo ?? null,
+          payload: { productCount: count },
         } satisfies ExtMessage)
       })
-      return true // async response
-    }
+      .catch((err) => log('Scrape error:', err))
+  }
 
-    if (msg.type === 'SYNC_CATALOG_ON_POPUP') {
-      void syncCatalogFromActiveTab().catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
-    }
+  return false
+})
 
-    if (msg.type === 'GET_IDB_CATALOG') {
-      void Promise.all([dbGetAll(STORE_PRODUCTS), dbGetAll(STORE_COLLECTIONS)]).then(
-        ([products, collections]) => {
-          const payload = {
-            products: products as Array<Record<string, unknown> & { id: number }>,
-            collections: collections as Array<Record<string, unknown> & { id: number }>,
-          }
-          sendResponse({
-            type: 'CATALOG_IDB_RESPONSE',
-            from: 'background',
-            payload,
-          } satisfies ExtMessage)
-        },
-      )
-      return true
-    }
-
-    if (msg.type === 'START_SCRAPE') {
-      const { domain, collectionHandle, slowMode } = msg.payload
-      scrapeProducts(domain, { collectionHandle, slowMode })
-        .then(async (count) => {
-          await storageGet(['storeInfo']).then(async ({ storeInfo }) => {
-            if (storeInfo) {
-              await storageSet({
-                storeInfo: { ...storeInfo, productCount: count },
-              })
-            }
-          })
-          await sendToPopup({
-            type: 'SCRAPE_COMPLETE',
-            from: 'background',
-            payload: { productCount: count },
-          } satisfies ExtMessage)
-        })
-        .catch((err) => {
-          log('Scrape error:', err)
-        })
-    }
-
-    return false
-  },
-)
-
-// ─── Install / update lifecycle ───────────────────────────────────────────────
+// ─── Install / startup lifecycle ──────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   log(`onInstalled: ${reason} — v${__APP_VERSION__}`)
@@ -542,7 +672,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     const defaultPopupSettings: PopupSettings = {
       settingsVersion: 1,
       theme: 'light',
-      activeTab: 'stores',
+      activeTab: 'store',
       scrollY: 0,
       scraperView: 'products',
       scraperPage: 1,
@@ -563,5 +693,8 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     })
   }
 })
+
+// Clear stale per-store cache on every SW startup
+void clearExpiredStores().catch(() => undefined)
 
 log('Service worker started', IS_DEV ? '(dev)' : '(prod)')

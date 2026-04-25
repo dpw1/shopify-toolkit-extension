@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Header from './components/Header'
 import Nav, { type PageId } from './components/Nav'
 import Footer from './components/Footer'
+import ToastStack from './components/ToastStack'
 import { useStoreInfo } from './hooks/useStoreInfo'
 import OverviewPage from './pages/OverviewPage'
 import ThemePage from './pages/ThemePage'
@@ -22,7 +23,7 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false)
 
   const readyRef = useRef(false)
-  const storeInfo = useStoreInfo()
+  const { storeInfo, storeInfoLoaded, products, collections } = useStoreInfo()
 
   useEffect(() => {
     void loadPopupSettings().then((s) => {
@@ -116,6 +117,7 @@ export default function App() {
 
   return (
     <div className="app-container">
+      <ToastStack />
       <Header theme={settings.theme} onToggleTheme={handleToggleTheme} />
       <Nav
         activePage={settings.activeTab}
@@ -124,9 +126,10 @@ export default function App() {
         }}
       />
       <main className="content">
-        <div className={`view${settings.activeTab === 'stores' ? ' active' : ''}`}>
+        <div className={`view${settings.activeTab === 'store' ? ' active' : ''}`}>
           <OverviewPage
             storeInfo={storeInfo}
+            storeInfoLoaded={storeInfoLoaded}
             onNavigate={(p, opts) => {
               if (p === 'scraper' && opts?.scraperView != null) {
                 updateSettings({ activeTab: p, scraperView: opts.scraperView })
@@ -146,6 +149,8 @@ export default function App() {
           {settingsReady && (
             <ScraperPage
               storeInfo={storeInfo}
+              products={products}
+              collections={collections}
               initialView={settings.scraperView}
               initialPage={settings.scraperPage}
               initialSearch={settings.scraperSearch}

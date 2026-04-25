@@ -21,6 +21,64 @@ import {
   Video,
 } from 'lucide-react'
 import './storesTab.css'
+import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
+import {
+  CountryFlag,
+  countryCodeOnlyLabel,
+  normalizeShipsToCountries,
+} from '../components/CountryFlag'
+
+/** Shown until the popup receives the first `GET_STORE_INFO` response. */
+function StoreTabSkeleton() {
+  return (
+    <div className="stores-tab stores-tab--skeleton" aria-busy="true" aria-label="Loading store">
+      <div className="card store-top-card">
+        <div className="store-main-info">
+          <div className="store-identity">
+            <div className="st-sk st-sk-logo" />
+            <div className="st-sk-details">
+              <div className="st-sk st-sk-title" />
+              <div className="st-sk st-sk-line st-sk-line--md" />
+              <div className="st-sk st-sk-line st-sk-line--sm" />
+            </div>
+          </div>
+        </div>
+        <div className="store-stats-row">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="stat-box st-sk-stat" style={{ pointerEvents: 'none' }}>
+              <div className="st-sk st-sk-line st-sk-line--xs" />
+              <div className="st-sk st-sk-value" />
+              <div className="st-sk st-sk-line st-sk-line--xs" style={{ width: '48%' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="st-sk st-sk-section-title" />
+      <div className="intelligence-grid">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="intel-card col-3 st-sk-intel">
+            <div className="st-sk st-sk-line st-sk-line--xs" style={{ marginBottom: 10 }} />
+            <div className="st-sk st-sk-value" />
+            <div className="st-sk st-sk-line st-sk-line--sm" />
+          </div>
+        ))}
+        <div className="intel-card col-4 st-sk-intel">
+          <div className="st-sk st-sk-line st-sk-line--xs" style={{ marginBottom: 10 }} />
+          <div className="st-sk st-sk-block" />
+        </div>
+        <div className="intel-card col-5 st-sk-intel">
+          <div className="st-sk st-sk-line st-sk-line--xs" style={{ marginBottom: 10 }} />
+          <div className="st-sk st-sk-pay-row" />
+        </div>
+        <div className="intel-card col-3 st-sk-intel">
+          <div className="st-sk st-sk-line st-sk-line--xs" style={{ marginBottom: 10 }} />
+          <div className="st-sk st-sk-value" />
+          <div className="st-sk st-sk-line st-sk-line--sm" />
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /** Minimal inline SVG social icons (brand icons not in Lucide). */
 function SocialSvg({ platform }: { platform: string }) {
@@ -79,22 +137,13 @@ function SocialSvg({ platform }: { platform: string }) {
 
 interface OverviewPageProps {
   storeInfo: StoreInfo | null
+  storeInfoLoaded: boolean
   /** Pass `scraperView` when opening the Products tab so the correct sub-view shows. */
   onNavigate: (page: PageId, options?: { scraperView?: 'products' | 'collections' }) => void
 }
 
 function fmt(n: number) {
   return n.toLocaleString()
-}
-
-/** Convert a 2-letter ISO country code → emoji flag. */
-function countryFlag(code: string): string {
-  if (!code || code.length !== 2) return ''
-  const base = 0x1f1e6 - 65
-  return String.fromCodePoint(
-    code.toUpperCase().charCodeAt(0) + base,
-    code.toUpperCase().charCodeAt(1) + base,
-  )
 }
 
 /** Return "X days ago" label + formatted date string from a Date. */
@@ -111,17 +160,7 @@ function ageLabel(d: Date): { days: string; formatted: string } {
   return { days: `${days} days ago`, formatted }
 }
 
-
-const CARD_DISPLAY: Record<string, { label: string; cls: string }> = {
-  visa:              { label: 'VISA',     cls: 'visa' },
-  master:            { label: 'MC',       cls: 'mc' },
-  american_express:  { label: 'AMEX',     cls: 'amex' },
-  discover:          { label: 'DISCOVER', cls: 'discover' },
-  diners_club:       { label: 'DINERS',   cls: 'diners' },
-  jcb:               { label: 'JCB',      cls: 'jcb' },
-}
-
-export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProps) {
+export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }: OverviewPageProps) {
   const [copied, setCopied] = useState(false)
 
   const shopMeta  = storeInfo?.shopMeta
@@ -145,7 +184,11 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
   const currency    = shopMeta?.currency || null
   const moneyFormat = shopMeta?.money_format?.replace(/<[^>]+>/g, '').trim() || null
 
-  const shipsTo = shopMeta?.ships_to_countries ?? []
+  const shipsTo = normalizeShipsToCountries(
+    shopMeta?.ships_to_countries ??
+      (shopMeta as unknown as { shipsToCountries?: unknown } | null | undefined)
+        ?.shipsToCountries,
+  )
 
   const cards           = shopMeta?.shopify_pay_enabled_card_brands ?? []
   const shopPayEnabled  = shopMeta?.offers_shop_pay_installments ?? false
@@ -175,6 +218,10 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
     void navigator.clipboard.writeText(email).catch(() => {})
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (!storeInfoLoaded) {
+    return <StoreTabSkeleton />
   }
 
   if (!connected) {
@@ -300,9 +347,9 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
           </div>
           {locationCity && <div className="intel-value">{locationCity}</div>}
           {locationCountry && (
-            <div className="intel-sub">
+            <div className="intel-sub intel-sub--with-flag">
+              <CountryFlag country={locationCountry} square className="stores-tab-flag" />
               {locationCountry}
-              {' '}<span className="flag">{countryFlag(locationCountry)}</span>
             </div>
           )}
           {!locationCity && !locationCountry && (
@@ -327,15 +374,20 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
             Ships To
           </div>
           {shipsTo.length > 0 ? (
-            <div className="intel-sub" style={{ marginTop: 4 }}>
-              {shipsTo.slice(0, 6).map((code) => (
-                <span key={code} className="ships-chip">
-                  <span className="flag">{countryFlag(code)}</span>
-                  {code}
+            <div className="intel-sub ships-to-flags" style={{ marginTop: 4 }}>
+              {shipsTo.slice(0, 12).map((code, i) => (
+                <span
+                  key={`${i}-${code}`}
+                  className="ships-flag-chip"
+                  title={countryCodeOnlyLabel(code)}
+                >
+                  <CountryFlag country={code} className="stores-tab-flag stores-tab-flag--ships" />
                 </span>
               ))}
-              {shipsTo.length > 6 && (
-                <span className="ships-chip">+{shipsTo.length - 6}</span>
+              {shipsTo.length > 12 && (
+                <span className="ships-more" title={`${shipsTo.length} countries total`}>
+                  +{shipsTo.length - 12}
+                </span>
               )}
             </div>
           ) : (
@@ -392,21 +444,9 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
           </div>
           {cards.length > 0 ? (
             <div className="payment-methods">
-              {cards.map((card) => {
-                const info = CARD_DISPLAY[card]
-                if (!info) return <span key={card} className="pay-badge">{card.toUpperCase()}</span>
-                if (info.cls === 'mc') {
-                  return (
-                    <div key={card} className="pay-badge mc">
-                      <div className="mc-circle mc-red" />
-                      <div className="mc-circle mc-orange" />
-                    </div>
-                  )
-                }
-                return (
-                  <div key={card} className={`pay-badge ${info.cls}`}>{info.label}</div>
-                )
-              })}
+              {cards.map((card) => (
+                <PaymentBrandIcon key={card} brand={card} />
+              ))}
             </div>
           ) : (
             <div className="payment-methods">—</div>
@@ -428,8 +468,9 @@ export default function OverviewPage({ storeInfo, onNavigate }: OverviewPageProp
           </div>
           {estimatedAge ? (
             <>
-           
-              <div className="intel-value">{ageLabel(estimatedAge).days}</div>
+              <div className="intel-value" style={{ marginTop: 4 }}>
+                {ageLabel(estimatedAge).days}
+              </div>
               <div className="age-sub">{ageLabel(estimatedAge).formatted}</div>
             </>
           ) : (
