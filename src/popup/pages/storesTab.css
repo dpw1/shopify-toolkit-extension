@@ -304,6 +304,28 @@
   box-shadow: none;
 }
 
+.stores-tab .stores-tab-ship-flag-img {
+  display: block;
+  width: 1.55em;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.stores-tab .ships-flag-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
 .stores-tab .ships-more {
   display: inline-flex;
   align-items: center;
@@ -441,6 +463,18 @@
   margin-top: 2px;
 }
 
+.stores-tab .estimated-age-block {
+  margin-top: 4px;
+}
+
+.stores-tab .age-first-published {
+  display: block;
+  margin-top: 8px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* ── Empty / not-connected state ─────────────────────────────────────────────── */
 .stores-tab .not-connected {
   display: flex;
@@ -529,4 +563,15 @@
   height: 36px;
   width: 100%;
   border-radius: var(--radius-md);
+}
+
+/* Inline stat value skeleton (Store tab — products / collections while catalog syncs) */
+.stores-tab .stat-value-skeleton {
+  display: inline-block;
+  vertical-align: middle;
+  min-width: 3.25rem;
+  height: 1.35em;
+  border-radius: var(--radius-sm);
+  background: var(--border-dark);
+  animation: st-sk-pulse 1.15s ease-in-out infinite;
 }

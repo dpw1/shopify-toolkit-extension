@@ -1,0 +1,37 @@
+  "Avera": {
+        "themeURL": "https://themes.shopify.com/themes/july/presets/avera",
+        "title": "Avera",
+        "price": "$320 USD",
+        "description": "Part of July • A refined preset crafted for modern fashion brands",
+        "creator": "Webvista Studio",
+        "livedemo": "https://theme-avera-demo.myshopify.com/",
+        "desktopImage": "https://cdn.shopify.com/theme-store/0n2uy4mwzq93dpnxws444f8jw9cs.jpg",
+        "mobileImage": "https://cdn.shopify.com/theme-store/3605ebphj6caylg2ooqd7l9cv963.jpg",
+        "fetch_date": "2026-04-25T04:52:37.281Z",
+        "reviews": {
+            "totalReviews": 3,
+            "positiveCount": 3,
+            "neutralCount": 0,
+            "negativeCount": 0,
+            "comments": [
+                {
+                    "name": "Lopeie",
+                    "comment": "I am absolutely thrilled with the July theme! The design is sleek, modern, and incredibly easy to customize. What really sets it apart, though, is the service team. They were incredibly responsive and helped me resolve a few technical questions within hours.",
+                    "commentType": "positive",
+                    "date": "2026-04-21"
+                },
+                {
+                    "name": "The Fold",
+                    "comment": "A great theme with a beautifully crafted design. The support team is also responsive and helpful. Highly recommended!",
+                    "commentType": "positive",
+                    "date": "2026-04-20"
+                },
+                {
+                    "name": "VitaDive",
+                    "comment": "After comparing several similar options, I found that July is the best Shopify theme for my store. The design is beautifully crafted, the user experience is simple and intuitive, and the support team is incredibly responsive and helpful. Highly recommended!",
+                    "commentType": "positive",
+                    "date": "2026-04-20"
+                }
+            ]
+        }
+    },

@@ -155,6 +155,12 @@ async function run() {
   })
 }
 
+window.addEventListener('message', (event) => {
+  const d = event.data
+  if (!d || d.__spykit !== true || d.type !== 'SPYKIT_RERUN_PAGE_DATA') return
+  void run().catch((err) => console.error('[SpyKit page-world] rerun', err))
+})
+
 ;(async () => {
   try {
     await run()

@@ -6,6 +6,7 @@ import {
   PaginatedTable,
   type PerPage,
 } from '../components/PaginatedTable'
+import { appendUtmToUrl } from '../lib/appendUtm'
 import { emitSpykitToast } from '../lib/spykitToastBus'
 import './productsTab.css'
 
@@ -548,7 +549,8 @@ export default function ScraperPage({
 
   function openPath(path: string) {
     if (!baseUrl || !path || path === '—') return
-    window.open(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, '_blank')
+    const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
+    window.open(appendUtmToUrl(url), '_blank')
   }
 
   function onReSync() {

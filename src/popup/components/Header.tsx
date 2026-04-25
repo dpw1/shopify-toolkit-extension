@@ -1,22 +1,14 @@
-import {
-  MoreVertical,
-  Moon,
-  ScanEye,
-  Settings,
-  Star,
-  Sun,
-} from 'lucide-react'
+import { MoreVertical, Settings, Star } from 'lucide-react'
 
 interface HeaderProps {
-  theme: 'light' | 'dark'
-  onToggleTheme: () => void
+  onOpenSettings?: () => void
 }
 
-export default function Header({ theme, onToggleTheme }: HeaderProps) {
+export default function Header({ onOpenSettings }: HeaderProps) {
   return (
     <header className="header">
       <div className="brand">
-        <ScanEye className="brand-icon" strokeWidth={2} aria-hidden />
+        <img className="brand-logo" src="/icons/icon128.png" alt="Shopify SpyKit logo" />
         <span className="brand-title">Shopify SpyKit</span>
         <span className="badge-pro">
           <Star style={{ width: 12, height: 12 }} strokeWidth={2} aria-hidden />
@@ -24,15 +16,8 @@ export default function Header({ theme, onToggleTheme }: HeaderProps) {
         </span>
       </div>
       <div className="header-actions">
-        <button type="button" aria-label="Settings">
+        <button type="button" aria-label="Settings" onClick={() => onOpenSettings?.()}>
           <Settings size={20} strokeWidth={2} />
-        </button>
-        <button type="button" onClick={onToggleTheme} aria-label="Toggle theme">
-          {theme === 'dark' ? (
-            <Sun size={20} strokeWidth={2} />
-          ) : (
-            <Moon size={20} strokeWidth={2} />
-          )}
         </button>
         <button type="button" aria-label="More options">
           <MoreVertical size={20} strokeWidth={2} />

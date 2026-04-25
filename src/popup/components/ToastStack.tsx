@@ -1,5 +1,6 @@
 import { Info } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { subscribeSpykitToast } from '../lib/spykitToastBus'
 
 const DEFAULT_MS = 6500
@@ -41,10 +42,10 @@ export default function ToastStack() {
     }
   }, [push])
 
-  if (!items.length) return null
+  const mount = typeof document !== 'undefined' ? document.getElementById('spykit-toast-root') : null
 
-  return (
-    <div className="spykit-toast-stack" aria-live="polite">
+  const stack = (
+    <div className="spykit-toast-stack" aria-live="polite" aria-relevant="additions text">
       {items.map((t) => (
         <div key={t.id} className="spykit-toast spykit-toast--info" role="status">
           <Info size={16} style={{ color: 'var(--info)', flexShrink: 0 }} aria-hidden />
@@ -53,4 +54,8 @@ export default function ToastStack() {
       ))}
     </div>
   )
+
+  if (!items.length) return null
+  if (mount) return createPortal(stack, mount)
+  return stack
 }

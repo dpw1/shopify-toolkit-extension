@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { StoreInfo } from '../../types'
+import type { CatalogProductRow, StoreInfo } from '../../types'
 import type { PageId } from '../components/Nav'
 import {
   ArrowUpRight,
@@ -13,7 +13,6 @@ import {
   Globe,
   Mail,
   MapPin,
-  Music2,
   Package,
   Palette,
   Puzzle,
@@ -25,8 +24,13 @@ import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
 import {
   CountryFlag,
   countryCodeOnlyLabel,
+  getShipsToCountriesRaw,
   normalizeShipsToCountries,
 } from '../components/CountryFlag'
+import { ShipsToFlag } from '../components/ShipsToFlag'
+import { appendUtmToUrl } from '../lib/appendUtm'
+import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
+import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 
 /** Shown until the popup receives the first `GET_STORE_INFO` response. */
 function StoreTabSkeleton() {
@@ -85,10 +89,8 @@ function SocialSvg({ platform }: { platform: string }) {
   switch (platform) {
     case 'instagram':
       return (
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-          <circle cx="12" cy="12" r="4"/>
-          <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
+          <path d="M10.202,2.098c-1.49,.07-2.507,.308-3.396,.657-.92,.359-1.7,.84-2.477,1.619-.776,.779-1.254,1.56-1.61,2.481-.345,.891-.578,1.909-.644,3.4-.066,1.49-.08,1.97-.073,5.771s.024,4.278,.096,5.772c.071,1.489,.308,2.506,.657,3.396,.359,.92,.84,1.7,1.619,2.477,.779,.776,1.559,1.253,2.483,1.61,.89,.344,1.909,.579,3.399,.644,1.49,.065,1.97,.08,5.771,.073,3.801-.007,4.279-.024,5.773-.095s2.505-.309,3.395-.657c.92-.36,1.701-.84,2.477-1.62s1.254-1.561,1.609-2.483c.345-.89,.579-1.909,.644-3.398,.065-1.494,.081-1.971,.073-5.773s-.024-4.278-.095-5.771-.308-2.507-.657-3.397c-.36-.92-.84-1.7-1.619-2.477s-1.561-1.254-2.483-1.609c-.891-.345-1.909-.58-3.399-.644s-1.97-.081-5.772-.074-4.278,.024-5.771,.096m.164,25.309c-1.365-.059-2.106-.286-2.6-.476-.654-.252-1.12-.557-1.612-1.044s-.795-.955-1.05-1.608c-.192-.494-.423-1.234-.487-2.599-.069-1.475-.084-1.918-.092-5.656s.006-4.18,.071-5.656c.058-1.364,.286-2.106,.476-2.6,.252-.655,.556-1.12,1.044-1.612s.955-.795,1.608-1.05c.493-.193,1.234-.422,2.598-.487,1.476-.07,1.919-.084,5.656-.092,3.737-.008,4.181,.006,5.658,.071,1.364,.059,2.106,.285,2.599,.476,.654,.252,1.12,.555,1.612,1.044s.795,.954,1.051,1.609c.193,.492,.422,1.232,.486,2.597,.07,1.476,.086,1.919,.093,5.656,.007,3.737-.006,4.181-.071,5.656-.06,1.365-.286,2.106-.476,2.601-.252,.654-.556,1.12-1.045,1.612s-.955,.795-1.608,1.05c-.493,.192-1.234,.422-2.597,.487-1.476,.069-1.919,.084-5.657,.092s-4.18-.007-5.656-.071M21.779,8.517c.002,.928,.755,1.679,1.683,1.677s1.679-.755,1.677-1.683c-.002-.928-.755-1.679-1.683-1.677,0,0,0,0,0,0-.928,.002-1.678,.755-1.677,1.683m-12.967,7.496c.008,3.97,3.232,7.182,7.202,7.174s7.183-3.232,7.176-7.202c-.008-3.97-3.233-7.183-7.203-7.175s-7.182,3.233-7.174,7.203m2.522-.005c-.005-2.577,2.08-4.671,4.658-4.676,2.577-.005,4.671,2.08,4.676,4.658,.005,2.577-2.08,4.671-4.658,4.676-2.577,.005-4.671-2.079-4.676-4.656h0"></path>
         </svg>
       )
     case 'facebook':
@@ -121,12 +123,16 @@ function SocialSvg({ platform }: { platform: string }) {
       )
     case 'pinterest':
       return (
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2C6.48 2 2 6.48 2 12c0 4.24 2.65 7.86 6.39 9.29-.09-.78-.17-1.98.03-2.83.19-.78 1.26-5.33 1.26-5.33s-.32-.64-.32-1.59c0-1.49.86-2.6 1.93-2.6.91 0 1.35.68 1.35 1.5 0 .91-.58 2.28-.88 3.55-.25 1.06.52 1.92 1.56 1.92 1.87 0 3.13-2.4 3.13-5.24 0-2.16-1.46-3.77-4.09-3.77-2.98 0-4.83 2.23-4.83 4.72 0 .86.25 1.46.64 1.93.18.21.2.29.14.53-.04.18-.15.6-.19.77-.06.24-.25.33-.46.24-1.28-.52-1.88-1.93-1.88-3.5 0-2.6 2.2-5.72 6.56-5.72 3.52 0 5.85 2.56 5.85 5.31 0 3.65-2.02 6.38-5 6.38-.99 0-1.93-.53-2.25-1.13l-.65 2.52c-.23.9-.87 2.02-1.3 2.7.98.3 2.01.46 3.08.46 5.52 0 10-4.48 10-10S17.52 2 12 2z"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
+          <path d="M16,2C8.268,2,2,8.268,2,16c0,5.931,3.69,11.001,8.898,13.041-.122-1.108-.233-2.811,.049-4.02,.254-1.093,1.642-6.959,1.642-6.959,0,0-.419-.839-.419-2.079,0-1.947,1.128-3.4,2.533-3.4,1.194,0,1.771,.897,1.771,1.972,0,1.201-.765,2.997-1.16,4.661-.33,1.393,.699,2.53,2.073,2.53,2.488,0,4.401-2.624,4.401-6.411,0-3.352-2.409-5.696-5.848-5.696-3.983,0-6.322,2.988-6.322,6.076,0,1.203,.464,2.494,1.042,3.195,.114,.139,.131,.26,.097,.402-.106,.442-.342,1.393-.389,1.588-.061,.256-.203,.311-.468,.187-1.749-.814-2.842-3.37-2.842-5.424,0-4.416,3.209-8.472,9.25-8.472,4.857,0,8.631,3.461,8.631,8.086,0,4.825-3.042,8.708-7.265,8.708-1.419,0-2.752-.737-3.209-1.608,0,0-.702,2.673-.872,3.328-.316,1.216-1.169,2.74-1.74,3.67,1.31,.406,2.702,.624,4.145,.624,7.732,0,14-6.268,14-14S23.732,2,16,2Z"></path>
         </svg>
       )
     case 'tiktok':
-      return <Music2 size={15} />
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
+          <path d="M24.562,7.613c-1.508-.983-2.597-2.557-2.936-4.391-.073-.396-.114-.804-.114-1.221h-4.814l-.008,19.292c-.081,2.16-1.859,3.894-4.039,3.894-.677,0-1.315-.169-1.877-.465-1.288-.678-2.169-2.028-2.169-3.582,0-2.231,1.815-4.047,4.046-4.047,.417,0,.816,.069,1.194,.187v-4.914c-.391-.053-.788-.087-1.194-.087-4.886,0-8.86,3.975-8.86,8.86,0,2.998,1.498,5.65,3.783,7.254,1.439,1.01,3.19,1.606,5.078,1.606,4.886,0,8.86-3.975,8.86-8.86V11.357c1.888,1.355,4.201,2.154,6.697,2.154v-4.814c-1.345,0-2.597-.4-3.647-1.085Z"></path>
+        </svg>
+      )
     case 'snapchat':
     case 'vimeo':
       return <Video size={15} />
@@ -138,6 +144,11 @@ function SocialSvg({ platform }: { platform: string }) {
 interface OverviewPageProps {
   storeInfo: StoreInfo | null
   storeInfoLoaded: boolean
+  /** Current IndexedDB catalog lengths (same source as Products tab). */
+  catalogProductCount: number
+  catalogCollectionCount: number
+  /** Product rows from IDB (for age from `published_at`). */
+  catalogProducts: CatalogProductRow[]
   /** Pass `scraperView` when opening the Products tab so the correct sub-view shows. */
   onNavigate: (page: PageId, options?: { scraperView?: 'products' | 'collections' }) => void
 }
@@ -146,21 +157,14 @@ function fmt(n: number) {
   return n.toLocaleString()
 }
 
-/** Return "X days ago" label + formatted date string from a Date. */
-function ageLabel(d: Date): { days: string; formatted: string } {
-  const ms = Date.now() - d.getTime()
-  const days = Math.floor(ms / 86_400_000)
-  const formatted = d.toLocaleString(undefined, {
-    month: '2-digit',
-    day: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-  return { days: `${days} days ago`, formatted }
-}
-
-export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }: OverviewPageProps) {
+export default function OverviewPage({
+  storeInfo,
+  storeInfoLoaded,
+  catalogProductCount,
+  catalogCollectionCount,
+  catalogProducts,
+  onNavigate,
+}: OverviewPageProps) {
   const [copied, setCopied] = useState(false)
 
   const shopMeta  = storeInfo?.shopMeta
@@ -173,22 +177,50 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
     ? `https://${shopMeta.myshopify_domain}`
     : storeInfo?.domain ? `https://${storeInfo.domain}` : null
 
-  const productCount    = shopMeta?.published_products_count    ?? storeInfo?.productCount    ?? 0
-  const collectionCount = shopMeta?.published_collections_count ?? storeInfo?.collectionCount ?? 0
-  const themeName       = storeInfo?.theme?.name ?? '—'
+  const metaProductCount = shopMeta?.published_products_count
+  const metaCollectionCount = shopMeta?.published_collections_count
+  const hasMetaProductCount = typeof metaProductCount === 'number'
+  const hasMetaCollectionCount = typeof metaCollectionCount === 'number'
+
+  const catalogLoading = storeInfo?.catalogLoading === true
+  const idbP = catalogProductCount
+  const idbC = catalogCollectionCount
+
+  /** Skeleton only while background catalog sync runs and we have neither meta nor IDB rows yet. */
+  const productsStatLoading =
+    !hasMetaProductCount && idbP === 0 && catalogLoading
+  const collectionsStatLoading =
+    !hasMetaCollectionCount && idbC === 0 && catalogLoading
+
+  const productCount = hasMetaProductCount
+    ? metaProductCount!
+    : idbP > 0
+      ? idbP
+      : (storeInfo?.productCount ?? 0)
+  const collectionCount = hasMetaCollectionCount
+    ? metaCollectionCount!
+    : idbC > 0
+      ? idbC
+      : (storeInfo?.collectionCount ?? 0)
+
+  const themeName       = getResolvedThemeForUI(storeInfo)?.name ?? '—'
   const appsCount       = storeInfo?.apps?.length ?? 0
 
   const locationCity = [shopMeta?.city, shopMeta?.province].filter(Boolean).join(', ') || null
   const locationCountry = shopMeta?.country || null
 
-  const currency    = shopMeta?.currency || null
-  const moneyFormat = shopMeta?.money_format?.replace(/<[^>]+>/g, '').trim() || null
+  /** ISO 4217 code only (e.g. USD), not money format string. */
+  const currencyCode = (() => {
+    const c = shopMeta?.currency
+    if (c == null || c === '') return null
+    const s = String(c).trim()
+    if (/^[A-Za-z]{3}$/.test(s)) return s.toUpperCase()
+    const letters = s.replace(/[^A-Za-z]/g, '')
+    if (letters.length >= 3) return letters.slice(0, 3).toUpperCase()
+    return s
+  })()
 
-  const shipsTo = normalizeShipsToCountries(
-    shopMeta?.ships_to_countries ??
-      (shopMeta as unknown as { shipsToCountries?: unknown } | null | undefined)
-        ?.shipsToCountries,
-  )
+  const shipsTo = normalizeShipsToCountries(getShipsToCountriesRaw(shopMeta))
 
   const cards           = shopMeta?.shopify_pay_enabled_card_brands ?? []
   const shopPayEnabled  = shopMeta?.offers_shop_pay_installments ?? false
@@ -198,9 +230,9 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
   const email         = contacts?.emails?.[0] || null
   const socialEntries = Object.entries(contacts?.social ?? {})
 
-  /** Find the earliest published_at from the product sample for "store age" estimate. */
+  /** Earliest `published_at` from IDB catalog (full product list). */
   const estimatedAge = useMemo(() => {
-    const products = storeInfo?.productsSample
+    const products = catalogProducts
     if (!products?.length) return null
     let earliest: Date | null = null
     for (const p of products) {
@@ -211,7 +243,7 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
       }
     }
     return earliest
-  }, [storeInfo?.productsSample])
+  }, [catalogProducts])
 
   function copyEmail() {
     if (!email) return
@@ -252,7 +284,7 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
               </div>
               <div className="store-links">
                 {myshopifyUrl && (
-                  <a href={myshopifyUrl} target="_blank" rel="noreferrer">
+                  <a href={appendUtmToUrl(myshopifyUrl)} target="_blank" rel="noreferrer">
                     {shopMeta?.myshopify_domain ?? storeInfo?.domain}
                     <ArrowUpRight size={13} />
                   </a>
@@ -314,7 +346,13 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
               <Package size={14} className="stat-icon green" />
               Products
             </div>
-            <div className="stat-value">{fmt(productCount)}</div>
+            <div className="stat-value">
+              {productsStatLoading ? (
+                <span className="stat-value-skeleton" aria-hidden />
+              ) : (
+                fmt(productCount)
+              )}
+            </div>
             <div className="stat-link">View &rsaquo;</div>
           </div>
 
@@ -328,7 +366,13 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
               <Folder size={14} className="stat-icon orange" />
               Collections
             </div>
-            <div className="stat-value">{fmt(collectionCount)}</div>
+            <div className="stat-value">
+              {collectionsStatLoading ? (
+                <span className="stat-value-skeleton" aria-hidden />
+              ) : (
+                fmt(collectionCount)
+              )}
+            </div>
             <div className="stat-link">View &rsaquo;</div>
           </div>
         </div>
@@ -363,8 +407,7 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
             <div className="icon green"><DollarSign size={13} /></div>
             Currency
           </div>
-          <div className="intel-value">{currency ?? '—'}</div>
-          {moneyFormat && <div className="intel-sub">{moneyFormat}</div>}
+          <div className="intel-value">{currencyCode ?? '—'}</div>
         </div>
 
         {/* Ships To */}
@@ -381,7 +424,7 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
                   className="ships-flag-chip"
                   title={countryCodeOnlyLabel(code)}
                 >
-                  <CountryFlag country={code} className="stores-tab-flag stores-tab-flag--ships" />
+                  <ShipsToFlag country={code} className="stores-tab-flag--ships" />
                 </span>
               ))}
               {shipsTo.length > 12 && (
@@ -404,7 +447,7 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
                 <a
                   key={platform}
                   className="social-icon"
-                  href={href}
+                  href={appendUtmToUrl(href)}
                   target="_blank"
                   rel="noreferrer"
                   title={platform.charAt(0).toUpperCase() + platform.slice(1)}
@@ -427,11 +470,11 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
           )}
         </div>
 
-        {/* About */}
+        {/* Description */}
         <div className="intel-card col-4">
           <div className="intel-header">
             <div className="icon orange"><FileText size={13} /></div>
-            About
+            Description
           </div>
           <p className="about-text">{description ?? '—'}</p>
         </div>
@@ -467,12 +510,14 @@ export default function OverviewPage({ storeInfo, storeInfoLoaded, onNavigate }:
             Estimated Age
           </div>
           {estimatedAge ? (
-            <>
+            <div className="estimated-age-block">
               <div className="intel-value" style={{ marginTop: 4 }}>
-                {ageLabel(estimatedAge).days}
+                {formatStoreAgeSummary(estimatedAge)}
               </div>
-              <div className="age-sub">{ageLabel(estimatedAge).formatted}</div>
-            </>
+              <small className="age-first-published">
+                first product published on {formatFirstProductPublishedLine(estimatedAge)}
+              </small>
+            </div>
           ) : (
             <div className="intel-sub" style={{ marginTop: 4 }}>—</div>
           )}

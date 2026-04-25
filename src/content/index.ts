@@ -228,6 +228,27 @@ function init() {
   setTimeout(sendStoreContacts, 2000)
 }
 
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  const m = message as { type?: string }
+  if (m?.type !== 'SPYKIT_FORCE_REFRESH') return false
+  if (!isShopify()) {
+    sendResponse({ ok: false, error: 'not_shopify' })
+    return false
+  }
+  void (async () => {
+    try {
+      window.postMessage({ __spykit: true, type: 'SPYKIT_RERUN_PAGE_DATA' }, '*')
+      await fetchAndSendShopMeta()
+      sendStoreContacts()
+      setTimeout(sendStoreContacts, 2200)
+      sendResponse({ ok: true })
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) })
+    }
+  })()
+  return true
+})
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init)
 } else {

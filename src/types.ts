@@ -284,6 +284,12 @@ export interface MsgSyncCatalogOnPopup {
   from: 'popup'
 }
 
+/** Clear this tab’s canonical store from IDB + `storeCacheByDomain`, then re-fetch everything. */
+export interface MsgForceRefreshStore {
+  type: 'FORCE_REFRESH_STORE'
+  from: 'popup'
+}
+
 /** Load full product/collection objects written during catalog sync (IndexedDB). */
 export interface MsgGetIdbCatalog {
   type: 'GET_IDB_CATALOG'
@@ -351,6 +357,7 @@ export type ExtMessage =
   | MsgStoreContacts
   | MsgGetStoreInfo
   | MsgSyncCatalogOnPopup
+  | MsgForceRefreshStore
   | MsgGetIdbCatalog
   | MsgStartScrape
   | MsgExport

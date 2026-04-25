@@ -647,6 +647,46 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
     void syncCatalogFromActiveTab().catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
   }
 
+  if (msg.type === 'FORCE_REFRESH_STORE' && msg.from === 'popup') {
+    void (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+        if (!tab?.id) {
+          sendResponse({ ok: false, error: 'no_active_tab' })
+          return
+        }
+        const domain = await getCanonicalDomainFromTab(tab)
+        if (!domain) {
+          sendResponse({ ok: false, error: 'no_domain' })
+          return
+        }
+        const key = normalizeStoreDomainKey(domain)
+        try {
+          await dbDeleteByDomain(STORE_PRODUCTS, key)
+          await dbDeleteByDomain(STORE_COLLECTIONS, key)
+        } catch (e) {
+          log('FORCE_REFRESH IDB purge', e)
+        }
+        const map = await loadCacheMap()
+        delete map[key]
+        await storageSet({ storeCacheByDomain: map })
+        toastPopup(`Cleared cache for ${key} — re-fetching…`)
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: 'SPYKIT_FORCE_REFRESH' })
+        } catch {
+          /* tab may not have our content script (non-store URL) */
+        }
+        void syncCatalogFromActiveTab().catch((err) =>
+          console.error('[SpyKit BG] FORCE_REFRESH_STORE sync', err),
+        )
+        sendResponse({ ok: true })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
+    })()
+    return true
+  }
+
   if (msg.type === 'START_SCRAPE') {
     const { domain, collectionHandle, slowMode } = msg.payload
     scrapeProducts(domain, { collectionHandle, slowMode })

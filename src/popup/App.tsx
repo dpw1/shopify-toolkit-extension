@@ -3,6 +3,7 @@ import Header from './components/Header'
 import Nav, { type PageId } from './components/Nav'
 import Footer from './components/Footer'
 import ToastStack from './components/ToastStack'
+import SettingsModal from './components/SettingsModal'
 import { useStoreInfo } from './hooks/useStoreInfo'
 import OverviewPage from './pages/OverviewPage'
 import ThemePage from './pages/ThemePage'
@@ -21,6 +22,7 @@ import {
 export default function App() {
   const [settings, setSettings] = useState<PopupSettings>(DEFAULT_POPUP_SETTINGS)
   const [settingsReady, setSettingsReady] = useState(false)
+  const [spykitSettingsOpen, setSpykitSettingsOpen] = useState(false)
 
   const readyRef = useRef(false)
   const { storeInfo, storeInfoLoaded, products, collections } = useStoreInfo()
@@ -110,15 +112,15 @@ export default function App() {
     }
   }, [])
 
-  function handleToggleTheme() {
-    const next = settings.theme === 'dark' ? 'light' : 'dark'
-    updateSettings({ theme: next })
-  }
-
   return (
     <div className="app-container">
       <ToastStack />
-      <Header theme={settings.theme} onToggleTheme={handleToggleTheme} />
+      <SettingsModal
+        open={spykitSettingsOpen}
+        onClose={() => setSpykitSettingsOpen(false)}
+        storeDomainHint={storeInfo?.domain ?? null}
+      />
+      <Header onOpenSettings={() => setSpykitSettingsOpen(true)} />
       <Nav
         activePage={settings.activeTab}
         onNavigate={(page: PageId) => {
@@ -130,6 +132,9 @@ export default function App() {
           <OverviewPage
             storeInfo={storeInfo}
             storeInfoLoaded={storeInfoLoaded}
+            catalogProductCount={products.length}
+            catalogCollectionCount={collections.length}
+            catalogProducts={products}
             onNavigate={(p, opts) => {
               if (p === 'scraper' && opts?.scraperView != null) {
                 updateSettings({ activeTab: p, scraperView: opts.scraperView })
