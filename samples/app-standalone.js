@@ -1,6 +1,8 @@
 
 (async function () {
-    const APPS_JSON_URL = "https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json";
+    // Browser sample: URL must match `appsCatalogJsonFallbackUrl` in ../src/config/appsCatalog.defaults.json
+    const APPS_JSON_URL =
+      "https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json?v=126819430410946608741777188403";
   
     async function loadAppCatalog() {
       const response = await fetch(APPS_JSON_URL, { cache: "no-store" });

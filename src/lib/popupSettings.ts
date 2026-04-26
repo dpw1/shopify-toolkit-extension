@@ -25,6 +25,8 @@ export const DEFAULT_POPUP_SETTINGS: PopupSettings = {
   theme: 'light',
   activeTab: 'store',
   scrollY: 0,
+  appsExpandedAppKey: '',
+  appsScrollY: 0,
   scraperView: 'products',
   scraperPage: 1,
   scraperSearch: '',
@@ -47,6 +49,8 @@ function normalizePartial(raw: unknown): Partial<PopupSettings> {
   const tab = normalizeActiveTabId(o.activeTab)
   if (tab) out.activeTab = tab
   if (typeof o.scrollY === 'number' && o.scrollY >= 0) out.scrollY = Math.floor(o.scrollY)
+  if (typeof o.appsExpandedAppKey === 'string') out.appsExpandedAppKey = o.appsExpandedAppKey
+  if (typeof o.appsScrollY === 'number' && o.appsScrollY >= 0) out.appsScrollY = Math.floor(o.appsScrollY)
   if (o.scraperView === 'products' || o.scraperView === 'collections') out.scraperView = o.scraperView
   if (typeof o.scraperPage === 'number' && o.scraperPage >= 1) out.scraperPage = Math.floor(o.scraperPage)
   if (typeof o.scraperSearch === 'string') out.scraperSearch = o.scraperSearch

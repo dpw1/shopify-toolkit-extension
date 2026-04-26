@@ -260,6 +260,10 @@ export interface PopupSettings {
   theme: 'light' | 'dark'
   activeTab: PopupPageId
   scrollY: number
+  /** Apps tab: expanded card id/url key to restore on popup reopen */
+  appsExpandedAppKey: string
+  /** Apps tab: last scrollY while active on apps tab */
+  appsScrollY: number
   scraperView: 'products' | 'collections'
   scraperPage: number
   scraperSearch: string

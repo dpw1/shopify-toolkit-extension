@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify SpyKit - Apps Tab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            --bg-color: #f9fafb;
+            --surface-color: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --text-tertiary: #9ca3af;
+            --border-color: #e5e7eb;
+            --primary-brand: #6366f1; /* Indigo */
+            --primary-brand-hover: #4f46e5;
+            --primary-bg: #e0e7ff;
+            
+            --tag-sales-text: #4f46e5;
+            --tag-sales-bg: #e0e7ff;
+            --tag-marketing-text: #059669;
+            --tag-marketing-bg: #d1fae5;
+            --tag-reviews-text: #0284c7;
+            --tag-reviews-bg: #e0f2fe;
+
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-pill: 9999px;
+
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            padding: 24px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .extension-container {
+            width: 100%;
+            max-width: 900px;
+            background: var(--bg-color);
+            position: relative;
+            padding-bottom: 80px; /* Space for footer */
+        }
+
+        /* --- Toolbar (Search & Filters) --- */
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .search-bar {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-bar i {
+            position: absolute;
+            left: 14px;
+            color: var(--text-tertiary);
+            font-size: 18px;
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 10px 16px 10px 40px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            background: var(--surface-color);
+            transition: border-color 0.2s;
+        }
+
+        .search-bar input:focus {
+            border-color: var(--primary-brand);
+        }
+
+        .btn-outline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+
+        .btn-outline:hover {
+            background: #f3f4f6;
+        }
+
+        .btn-outline i {
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+
+        /* --- Category Pills --- */
+        .category-pills {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .pill {
+            padding: 8px 16px;
+            border-radius: var(--radius-pill);
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .pill:hover {
+            color: var(--text-primary);
+            background: #f3f4f6;
+        }
+
+        .pill.active {
+            background: #f3e8ff; /* Light purple */
+            color: var(--primary-brand);
+        }
+
+        .results-count {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        /* --- App Cards --- */
+        .app-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .app-card {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Card Header */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .card-header-left {
+            display: flex;
+            gap: 16px;
+        }
+
+        .app-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: var(--radius-lg);
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+        }
+        
+        .app-icon.klaviyo { background: #111827; padding: 12px; }
+        .app-icon.loox { background: #0ea5e9; padding: 12px; }
+
+        .app-info h3 {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .tag {
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .tag.sales { background: var(--tag-sales-bg); color: var(--tag-sales-text); }
+        .tag.marketing { background: var(--tag-marketing-bg); color: var(--tag-marketing-text); }
+        .tag.reviews { background: var(--tag-reviews-bg); color: var(--tag-reviews-text); }
+
+        .app-link-icon {
+            color: var(--text-tertiary);
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .app-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .app-developer {
+            color: var(--primary-brand);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .rating {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .rating i { color: #f59e0b; font-size: 16px; }
+        
+        .reviews-count { color: var(--text-secondary); font-weight: 400;}
+
+        .user-thought {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #059669;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .card-actions-top {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--surface-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover { background: #f3f4f6; }
+        .icon-btn.active { background: #f3e8ff; color: var(--primary-brand); border-color: #d8b4fe; }
+
+        /* Expanded Content */
+        .expanded-content {
+            margin-top: 24px;
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .gallery-img {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .gallery-more {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 600;
+            border-radius: var(--radius-md);
+        }
+
+        .description {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .show-more {
+            color: var(--primary-brand);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 24px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1.5fr;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .stat-rating-big {
+            text-align: center;
+            border-right: 1px solid var(--border-color);
+            padding-right: 24px;
+        }
+
+        .stat-rating-big h4 { font-size: 48px; font-weight: 700; line-height: 1; margin-bottom: 8px;}
+        .stars-big { color: #f59e0b; font-size: 18px; margin-bottom: 8px;}
+        .stat-rating-big p { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;}
+        .view-reviews { color: var(--primary-brand); font-size: 13px; font-weight: 500; display:flex; align-items:center; justify-content:center; gap:4px;}
+
+        .rating-breakdown {
+            border-right: 1px solid var(--border-color);
+            padding-right: 24px;
+        }
+
+        .rating-breakdown-title { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;}
+        
+        .breakdown-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: #f3f4f6;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary-brand);
+            border-radius: 3px;
+        }
+
+        .ai-summary h5 {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #059669;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .ai-summary p { font-size: 14px; font-weight: 600; line-height: 1.4; margin-bottom: 8px;}
+        .ai-summary span { font-size: 12px; color: var(--text-tertiary); display: block; margin-bottom: 12px;}
+        .ai-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            background: #ecfdf5;
+            color: #059669;
+            border-radius: var(--radius-pill);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* Pricing Area */
+        .pricing-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .pricing-header h4 { font-size: 14px; font-weight: 600; }
+        .pricing-header a { font-size: 13px; color: var(--primary-brand); font-weight: 500; text-decoration: none;}
+
+        .pricing-cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .price-card {
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            background: var(--surface-color);
+        }
+
+        .price-card .plan-name { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px;}
+        .price-card .price { font-size: 20px; font-weight: 700; margin-bottom: 4px;}
+        .price-card .price span { font-size: 12px; font-weight: 400; color: var(--text-secondary);}
+        .price-card .billing { font-size: 12px; color: var(--text-tertiary);}
+
+        /* Meta Details */
+        .meta-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 24px;
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .meta-item i.ph { font-size: 18px; color: var(--text-tertiary); margin-top: 2px;}
+        
+        .meta-content h5 { font-size: 13px; color: var(--text-secondary); font-weight: 400; margin-bottom: 4px;}
+        .meta-content p { font-size: 13px; color: var(--text-primary); font-weight: 500;}
+        .meta-content a { color: var(--primary-brand); text-decoration: none; font-weight: 500;}
+        
+        .integration-icons {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .int-icon { width: 20px; height: 20px; border-radius: 4px; }
+        .int-more { font-size: 11px; background: #f3f4f6; padding: 2px 6px; border-radius: 10px; color: var(--text-secondary); font-weight: 600;}
+
+        /* Card Bottom Actions */
+        .card-actions-bottom {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 12px;
+        }
+
+        .btn-primary {
+            background: var(--primary-brand);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-primary:hover { background: var(--primary-brand-hover); }
+
+        .btn-secondary {
+            background: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 12px 24px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-secondary:hover { background: #f3f4f6; }
+
+        /* Collapsed Extra Rows */
+        .collapsed-footer {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .footer-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .footer-stat label { font-size: 12px; color: var(--text-secondary); }
+        .footer-stat span { font-size: 13px; font-weight: 600; display:flex; align-items:center; gap:6px;}
+        .footer-stat .green-text { color: #059669; font-weight: 500; }
+
+        /* --- Pagination --- */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 24px;
+        }
+        
+        .page-numbers {
+            display: flex;
+            gap: 4px;
+            margin: 0 auto;
+        }
+
+        .page-btn {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid transparent;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            background: none;
+        }
+
+        .page-btn:hover { background: #f3f4f6; }
+        .page-btn.active {
+            background: #f3e8ff;
+            color: var(--primary-brand);
+            font-weight: 600;
+        }
+        .page-btn.nav { border: 1px solid var(--border-color); background: var(--surface-color);}
+
+        /* --- Bottom Fixed Bar --- */
+        .bottom-bar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 48px);
+            max-width: 900px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+            z-index: 100;
+        }
+
+        .security-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .shield-icon {
+            width: 40px;
+            height: 40px;
+            background: #ecfdf5;
+            color: #059669;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .security-text p { font-size: 13px; color: var(--text-primary); font-weight: 500;}
+        .security-text span { font-size: 12px; color: var(--text-secondary);}
+
+        .quota-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            max-width: 300px;
+        }
+        
+        .quota-text {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .quota-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: #f3f4f6;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .quota-bar-fill {
+            width: 40%; /* visual estimate */
+            height: 100%;
+            background: var(--primary-brand);
+            border-radius: 3px;
+        }
+
+        .btn-upgrade {
+            background: #f3e8ff;
+            color: var(--primary-brand);
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="extension-container">
+    
+    <div class="toolbar">
+        <div class="search-bar">
+            <i class="ph ph-magnifying-glass"></i>
+            <input type="text" placeholder="Search apps by name...">
+        </div>
+        <button class="btn-outline">
+            <i class="ph ph-faders"></i> Filters
+        </button>
+        <button class="btn-outline">
+            Sort: Rating <i class="ph ph-caret-down"></i>
+        </button>
+    </div>
+
+    <div class="category-pills">
+        <div class="pill active">All (24)</div>
+        <div class="pill">Marketing (8)</div>
+        <div class="pill">Sales (6)</div>
+        <div class="pill">Reviews (4)</div>
+        <div class="pill">Analytics (3)</div>
+        <div class="pill">Other (3)</div>
+    </div>
+
+    <div class="results-count">24 apps detected</div>
+
+    <div class="app-list">
+        
+        <div class="app-card">
+            <div class="card-header">
+                <div class="card-header-left">
+                    <img src="https://cdn.shopify.com/app-store/listing_images/6347318e87d00f6bd3f6983088921e25/icon/CJnNxtv0lu8CEAE=.png" alt="Shopify App Icon" class="app-icon">
+                    <div class="app-info">
+                        <h3>Shopify Search & Discovery <span class="tag sales">Sales</span> <i class="ph ph-arrow-square-out app-link-icon"></i></h3>
+                        <div class="app-meta">
+                            <span class="app-developer">by Shopify <i class="ph-fill ph-check-circle"></i></span>
+                            <span class="rating"><i class="ph-fill ph-star"></i> 4.6 <span class="reviews-count">(1,234 reviews)</span></span>
+                            <span class="user-thought"><i class="ph ph-thumbs-up"></i> Great for search accuracy</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-actions-top">
+                    <button class="icon-btn"><i class="ph ph-bookmark-simple"></i></button>
+                    <button class="icon-btn active"><i class="ph ph-caret-up"></i></button>
+                </div>
+            </div>
+
+            <div class="expanded-content">
+                <div class="gallery">
+                    <img src="https://cdn.shopify.com/app-store/listing_images/6347318e87d00f6bd3f6983088921e25/desktop_screenshot/CJeOxtv0lu8CEAE=.png" class="gallery-img">
+                    <img src="https://cdn.shopify.com/app-store/listing_images/6347318e87d00f6bd3f6983088921e25/desktop_screenshot/CJmOxtv0lu8CEAE=.png" class="gallery-img">
+                    <img src="https://cdn.shopify.com/app-store/listing_images/6347318e87d00f6bd3f6983088921e25/desktop_screenshot/CJqOxtv0lu8CEAE=.png" class="gallery-img">
+                    <div style="position:relative">
+                        <img src="https://cdn.shopify.com/app-store/listing_images/6347318e87d00f6bd3f6983088921e25/desktop_screenshot/CJuOxtv0lu8CEAE=.png" class="gallery-img">
+                        <div class="gallery-more">+3</div>
+                    </div>
+                </div>
+
+                <p class="description">Customize your storefront search and discovery experience. Help shoppers quickly find the products they're looking for with smart search, filtering, and product recommendations.</p>
+                <div class="show-more">Show more <i class="ph ph-caret-down"></i></div>
+
+                <div class="stats-grid">
+                    <div class="stat-rating-big">
+                        <h4>4.6</h4>
+                        <div class="stars-big">
+                            <i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star-half"></i>
+                        </div>
+                        <p>(1,234 reviews)</p>
+                        <a href="#" class="view-reviews">View reviews <i class="ph ph-arrow-square-out"></i></a>
+                    </div>
+                    <div class="rating-breakdown">
+                        <div class="rating-breakdown-title">Rating breakdown</div>
+                        <div class="breakdown-row"><span>5</span><i class="ph-fill ph-star" style="color:#f59e0b"></i> <div class="progress-bar"><div class="progress-fill" style="width: 70%"></div></div> <span>70% (862)</span></div>
+                        <div class="breakdown-row"><span>4</span><i class="ph-fill ph-star" style="color:#f59e0b"></i> <div class="progress-bar"><div class="progress-fill" style="width: 18%"></div></div> <span>18% (222)</span></div>
+                        <div class="breakdown-row"><span>3</span><i class="ph-fill ph-star" style="color:#f59e0b"></i> <div class="progress-bar"><div class="progress-fill" style="width: 7%"></div></div> <span>7% (86)</span></div>
+                        <div class="breakdown-row"><span>2</span><i class="ph-fill ph-star" style="color:#f59e0b"></i> <div class="progress-bar"><div class="progress-fill" style="width: 3%"></div></div> <span>3% (37)</span></div>
+                        <div class="breakdown-row"><span>1</span><i class="ph-fill ph-star" style="color:#f59e0b"></i> <div class="progress-bar"><div class="progress-fill" style="width: 2%"></div></div> <span>2% (27)</span></div>
+                    </div>
+                    <div class="ai-summary">
+                        <h5><i class="ph ph-thumbs-up"></i> Users think</h5>
+                        <p>Great for search accuracy and ease of use</p>
+                        <span>Based on 1,234 reviews</span>
+                        <div class="ai-badge"><i class="ph ph-sparkle"></i> AI Summary</div>
+                    </div>
+                </div>
+
+                <div class="pricing-header">
+                    <h4>Pricing</h4>
+                    <a href="#">View all plans ></a>
+                </div>
+                <div class="pricing-cards">
+                    <div class="price-card">
+                        <div class="plan-name">Basic</div>
+                        <div class="price">Free</div>
+                        <div class="billing">Free to install</div>
+                    </div>
+                    <div class="price-card">
+                        <div class="plan-name">Shopify</div>
+                        <div class="price">$39<span>/month</span></div>
+                        <div class="billing">Billed monthly</div>
+                    </div>
+                    <div class="price-card">
+                        <div class="plan-name">Advanced</div>
+                        <div class="price">$299<span>/month</span></div>
+                        <div class="billing">Billed monthly</div>
+                    </div>
+                    <div class="price-card">
+                        <div class="plan-name">Plus</div>
+                        <div class="price">$799<span>/month</span></div>
+                        <div class="billing">Billed monthly</div>
+                    </div>
+                </div>
+
+                <div class="meta-details">
+                    <div>
+                        <div class="meta-item">
+                            <i class="ph ph-calendar-blank"></i>
+                            <div class="meta-content">
+                                <h5>Categories</h5>
+                                <p>Search & Navigation, Merchandising</p>
+                            </div>
+                        </div>
+                        <div class="meta-item">
+                            <i class="ph ph-chart-line-up"></i>
+                            <div class="meta-content">
+                                <h5>Works with</h5>
+                                <div class="integration-icons">
+                                    <img src="https://cdn.iconscout.com/icon/free/png-256/free-shopify-226579.png" class="int-icon">
+                                    <img src="https://cdn.iconscout.com/icon/free/png-256/free-google-1772223-1507807.png" class="int-icon">
+                                    <span class="int-more">+12</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="meta-item">
+                            <i class="ph ph-globe"></i>
+                            <div class="meta-content">
+                                <h5>Languages</h5>
+                                <p>EN, ES, FR, DE, JA, ZH, PT, IT</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="meta-item">
+                            <i class="ph ph-user"></i>
+                            <div class="meta-content">
+                                <h5>Developer</h5>
+                                <a href="#">Shopify <i class="ph ph-arrow-square-out"></i></a>
+                            </div>
+                        </div>
+                        <div class="meta-item">
+                            <i class="ph ph-gear"></i>
+                            <div class="meta-content">
+                                <h5>Website</h5>
+                                <a href="#">shopify.com <i class="ph ph-arrow-square-out"></i></a>
+                            </div>
+                        </div>
+                        <div class="meta-item">
+                            <i class="ph ph-calendar-blank"></i>
+                            <div class="meta-content">
+                                <h5>Launched</h5>
+                                <p>Nov 8, 2015</p>
+                            </div>
+                        </div>
+                        <div class="meta-item">
+                            <i class="ph ph-chat-circle"></i>
+                            <div class="meta-content">
+                                <h5>Support</h5>
+                                <p>support@shopify.com</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-actions-bottom">
+                    <button class="btn-primary">View demo store <i class="ph ph-arrow-square-out"></i></button>
+                    <button class="btn-secondary">View in Shopify App Store <i class="ph ph-arrow-square-out"></i></button>
+                    <button class="btn-secondary"><i class="ph ph-bookmark-simple"></i> Save</button>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="app-card">
+            <div class="card-header">
+                <div class="card-header-left">
+                    <div class="app-icon klaviyo" style="display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:12px;">klaviyo</div>
+                    <div class="app-info">
+                        <h3>Klaviyo: Email Marketing & SMS <span class="tag marketing">Marketing</span> <i class="ph ph-arrow-square-out app-link-icon"></i></h3>
+                        <div class="app-meta">
+                            <span class="app-developer">by Klaviyo <i class="ph-fill ph-check-circle"></i></span>
+                            <span class="rating"><i class="ph-fill ph-star"></i> 4.7 <span class="reviews-count">(2,512 reviews)</span></span>
+                            <span class="user-thought"><i class="ph ph-thumbs-up"></i> Powerful email & SMS marketing</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-actions-top">
+                    <button class="icon-btn"><i class="ph ph-bookmark-simple"></i></button>
+                    <button class="icon-btn"><i class="ph ph-caret-down"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <div class="app-card">
+            <div class="card-header">
+                <div class="card-header-left">
+                    <div class="app-icon loox" style="display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:16px;">LOOX</div>
+                    <div class="app-info">
+                        <h3>Loox Product Reviews & Photos <span class="tag reviews">Reviews</span> <i class="ph ph-arrow-square-out app-link-icon"></i></h3>
+                        <div class="app-meta">
+                            <span class="app-developer">by Loox <i class="ph-fill ph-check-circle"></i></span>
+                            <span class="rating"><i class="ph-fill ph-star"></i> 4.8 <span class="reviews-count">(8,419 reviews)</span></span>
+                            <span class="user-thought"><i class="ph ph-thumbs-up"></i> Beautiful reviews that build trust</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-actions-top">
+                    <button class="icon-btn"><i class="ph ph-bookmark-simple"></i></button>
+                    <button class="icon-btn active"><i class="ph ph-caret-up"></i></button>
+                </div>
+            </div>
+            <div class="collapsed-footer">
+                <div class="footer-stat">
+                    <label>Pricing</label>
+                    <span>From $9.99 <span style="font-weight:400; color:var(--text-tertiary); font-size:11px;">/month</span></span>
+                </div>
+                <div class="footer-stat">
+                    <label>Users think</label>
+                    <span class="green-text"><i class="ph ph-thumbs-up"></i> Boosts conversion & trust</span>
+                </div>
+                <div class="footer-stat">
+                    <label>Works with</label>
+                    <div class="integration-icons" style="margin-top:0;">
+                        <img src="https://cdn.iconscout.com/icon/free/png-256/free-shopify-226579.png" class="int-icon">
+                        <img src="https://cdn.iconscout.com/icon/free/png-256/free-google-1772223-1507807.png" class="int-icon">
+                        <img src="https://cdn.iconscout.com/icon/free/png-256/free-facebook-logo-2019-1597680-1350125.png" class="int-icon">
+                        <span class="int-more">+8</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="pagination">
+        <div style="width: 120px;"></div> <div class="page-numbers">
+            <button class="page-btn nav"><i class="ph ph-caret-left"></i></button>
+            <button class="page-btn active">1</button>
+            <button class="page-btn">2</button>
+            <button class="page-btn">3</button>
+            <button class="page-btn">4</button>
+            <button class="page-btn">5</button>
+            <button class="page-btn nav"><i class="ph ph-caret-right"></i></button>
+        </div>
+        <button class="btn-outline" style="padding: 6px 12px;">5 per page <i class="ph ph-caret-down"></i></button>
+    </div>
+
+</div>
+
+<div class="bottom-bar">
+    <div class="security-info">
+        <div class="shield-icon"><i class="ph ph-shield-check"></i></div>
+        <div class="security-text">
+            <p>Minimal permissions.</p>
+            <span>Your data stays private.</span>
+        </div>
+    </div>
+    
+    <div class="quota-info">
+        <div class="quota-text">100 free syncs left <i class="ph ph-info"></i></div>
+        <div class="quota-bar-bg">
+            <div class="quota-bar-fill"></div>
+        </div>
+    </div>
+
+    <button class="btn-upgrade"><i class="ph ph-star"></i> Upgrade</button>
+</div>
+
+</body>
+</html>

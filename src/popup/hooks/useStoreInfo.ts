@@ -1,82 +1,126 @@
-import { useEffect, useState } from 'react'
-import type { CatalogCollectionRow, CatalogProductRow, StoreInfo } from '../../types'
+import { useEffect, useRef } from 'react'
 import { onStorageChange } from '../../lib/storage'
-import { loadPopupStoreBundle, requestContentShopScanFromPopup } from '../lib/popupStoreLoader'
+import {
+  checkActiveTabHasShopifyTheme,
+  fetchAllData,
+  loadPopupStoreBundle,
+  requestContentShopScanFromPopup,
+} from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
+import { useSpykitStore } from '../store/useSpykitStore'
+
+export type StorefrontEligibility = 'checking' | 'eligible' | 'ineligible'
 
 /**
- * Loads store snapshot for the active tab into React state + `window.storeData`.
+ * Orchestrates the popup data load using the centralized fetchAllData pipeline.
+ * All state is written to the Zustand store (useSpykitStore) so every component
+ * can subscribe independently without prop-drilling.
  *
- * Flow is centralized in `../lib/popupStoreLoader.ts` (`loadPopupStoreBundle`):
- * resolve `Shopify.shop` / `/meta.json` → read `storeCacheByDomain` → read IDB
- * → optionally kick off background catalog sync.
- *
- * `products` and `collections` are surfaced as their own state — NOT derived
- * from `storeInfo.productsSample` — so ScraperPage always receives the IDB
- * arrays the moment they are available, without depending on useMemo chains.
+ * Flow:
+ *  1. Check Shopify theme presence on active tab
+ *  2. Run content scan (page-world theme + app detection)
+ *  3. fetchAllData: store meta → collections → products → apps (with per-step toasts)
+ *  4. Re-run on storeCacheByDomain storage changes
  */
-export function useStoreInfo(): {
-  storeInfo: StoreInfo | null
-  storeInfoLoaded: boolean
-  products: CatalogProductRow[]
-  collections: CatalogCollectionRow[]
-} {
-  const [storeInfo, setStoreInfo] = useState<StoreInfo | null>(null)
-  const [storeInfoLoaded, setStoreInfoLoaded] = useState(false)
-  const [products, setProducts] = useState<CatalogProductRow[]>([])
-  const [collections, setCollections] = useState<CatalogCollectionRow[]>([])
+export function useStoreInfo(): void {
+  const {
+    setStoreInfo,
+    setProducts,
+    setCollections,
+    setLastFetchedAt,
+    setFetchStep,
+    setStoreInfoLoaded,
+    setStorefrontEligibility,
+  } = useSpykitStore()
+
+  const eligibleRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
 
-    async function applyBundle(si: StoreInfo | null) {
+    async function applyBundle(bundle: Awaited<ReturnType<typeof loadPopupStoreBundle>>) {
+      const si = bundle?.storeInfo ?? null
       await syncPopupStoreData(si)
-      // After syncPopupStoreData, window.storeData is the IDB source of truth.
-      // Mirror the same arrays into explicit React state so ScraperPage is
-      // driven by these — no useMemo chain, no stale-reference risk.
-      const p = window.storeData?.products ?? []
-      const c = window.storeData?.collections ?? []
+
+      const p = bundle?.products ?? window.storeData?.products ?? []
+      const c = bundle?.collections ?? window.storeData?.collections ?? []
+
       if (!cancelled) {
+        setStoreInfo(si)
         setProducts(p)
         setCollections(c)
-        setStoreInfo(si)
       }
     }
 
     async function runLoad() {
-      const bundle = await loadPopupStoreBundle()
+      const hasShopifyTheme = await checkActiveTabHasShopifyTheme()
       if (cancelled) return
-      await applyBundle(bundle?.storeInfo ?? null)
-      if (!cancelled) setStoreInfoLoaded(true)
+
+      if (!hasShopifyTheme) {
+        eligibleRef.current = false
+        setStorefrontEligibility('ineligible')
+        await applyBundle(null)
+        if (!cancelled) setStoreInfoLoaded(true)
+        return
+      }
+
+      eligibleRef.current = true
+      setStorefrontEligibility('eligible')
+
+      // Content scan first so PAGE_DATA (theme) lands before we read cache.
+      await requestContentShopScanFromPopup()
+
+      const bundle = await fetchAllData((step) => {
+        if (!cancelled) setFetchStep(step)
+      })
+
+      if (cancelled) return
+
+      await applyBundle(bundle)
+
+      if (!cancelled) {
+        setStoreInfoLoaded(true)
+        setLastFetchedAt(Date.now())
+        setFetchStep('done')
+      }
     }
 
-    // One run per popup open: ask the content script to scan the storefront (not on every storage/IDB refresh).
-    requestContentShopScanFromPopup()
     void runLoad()
 
     const unsub = onStorageChange('storeCacheByDomain', () => {
       void (async () => {
+        if (!eligibleRef.current) return
         const bundle = await loadPopupStoreBundle()
         if (cancelled) return
-        if (bundle) await applyBundle(bundle.storeInfo)
+        if (bundle) await applyBundle(bundle)
       })()
     })
 
     // DevTools: await window.spykitLoadStore()
-    ;(window as unknown as { spykitLoadStore?: () => Promise<StoreInfo | null> }).spykitLoadStore =
+    ;(window as unknown as { spykitLoadStore?: () => Promise<void> }).spykitLoadStore =
       async () => {
-        const bundle = await loadPopupStoreBundle()
-        if (bundle) await applyBundle(bundle.storeInfo)
-        return bundle?.storeInfo ?? null
+        if (!eligibleRef.current) return
+        const bundle = await fetchAllData((step) => setFetchStep(step))
+        if (bundle) {
+          await applyBundle(bundle)
+          setLastFetchedAt(Date.now())
+          setFetchStep('done')
+        }
       }
 
     return () => {
       cancelled = true
+      eligibleRef.current = false
       unsub()
-      delete (window as unknown as { spykitLoadStore?: () => Promise<StoreInfo | null> })
-        .spykitLoadStore
+      delete (window as unknown as { spykitLoadStore?: () => Promise<void> }).spykitLoadStore
     }
-  }, [])
-
-  return { storeInfo, storeInfoLoaded, products, collections }
+  }, [
+    setCollections,
+    setFetchStep,
+    setLastFetchedAt,
+    setProducts,
+    setStoreInfo,
+    setStoreInfoLoaded,
+    setStorefrontEligibility,
+  ])
 }

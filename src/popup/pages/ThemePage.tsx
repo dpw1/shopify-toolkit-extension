@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { StoreInfo } from '../../types'
+import { APPS_CATALOG_JSON_URL } from '../../config/appsCatalog'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 import {
@@ -109,7 +110,7 @@ function normName(v: string): string {
 async function resolveVersionedThemesJsonUrl(domain: string, themeId: number): Promise<string | null> {
   void domain
   void themeId
-  return 'https://pandatests.myshopify.com/cdn/shop/t/40/assets/themes.json'
+  return APPS_CATALOG_JSON_URL
 }
 
 export default function ThemePage({ storeInfo }: ThemePageProps) {

@@ -792,6 +792,8 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       theme: 'light',
       activeTab: 'store',
       scrollY: 0,
+      appsExpandedAppKey: '',
+      appsScrollY: 0,
       scraperView: 'products',
       scraperPage: 1,
       scraperSearch: '',

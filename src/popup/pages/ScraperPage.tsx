@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CatalogCollectionRow, CatalogProductRow, ExtMessage, StoreInfo } from '../../types'
-import { Search, Package, Folder, Link2, RefreshCw, X } from 'lucide-react'
+import type { CatalogCollectionRow, CatalogProductRow, StoreInfo } from '../../types'
+import { Search, Package, Folder, Link2, X } from 'lucide-react'
 import {
   buildPageList,
   PaginatedTable,
@@ -126,15 +126,6 @@ function toSmallImageUrl(url?: string): string | undefined {
   return `${withoutSuffix}_100x.${ext}${query}${hash}`
 }
 
-function formatRelative(t: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
-  if (s < 60) return 'just now'
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
-  return `${Math.floor(h / 24)} day(s) ago`
-}
 
 function exportRowsJson(filename: string, rows: ProductRow[]) {
   const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' })
@@ -553,13 +544,6 @@ export default function ScraperPage({
     window.open(appendUtmToUrl(url), '_blank')
   }
 
-  function onReSync() {
-    try {
-      emitSpykitToast('Re-syncing catalog…')
-      chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
-    } catch { /* no-op */ }
-  }
-
   function resetFilters() {
     setStockFilter('all')
     setVendorFilters([])
@@ -592,7 +576,7 @@ export default function ScraperPage({
     if (mainView !== 'products') return
     if (catalogWaitToastFired.current) return
     catalogWaitToastFired.current = true
-    emitSpykitToast('Catalog sync in progress — keep this popup open.')
+    emitSpykitToast('Fetching products')
   }, [showLoadingRows, mainView])
 
   // Delay the "no products" empty message slightly to avoid a 1-frame flash
@@ -931,19 +915,6 @@ export default function ScraperPage({
             </PaginatedTable>
           )}
 
-          {/* ── Meta footer ───────────────────────────────── */}
-          <div className="meta-footer">
-            {storeInfo?.detectedAt != null && (
-              <>
-                <span>Data updated {formatRelative(storeInfo.detectedAt)}</span>
-                <span>•</span>
-              </>
-            )}
-            <button type="button" className="re-scrape" onClick={onReSync}>
-              <RefreshCw size={12} strokeWidth={2} />
-              Re-sync catalog
-            </button>
-          </div>
         </div>
       </div>
     </div>

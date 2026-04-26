@@ -11,10 +11,10 @@
  */
 
 import type { ExtMessage, MsgPageData, ShopMetaJson, StoreContacts } from '../types'
+import { APPS_CATALOG_JSON_URL } from '../config/appsCatalog'
 
 declare const __APP_MODE__: string
 const IS_DEV = __APP_MODE__ === 'development'
-const APPS_JSON_URL = 'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json'
 
 function log(...args: unknown[]) {
   if (IS_DEV) console.log('[SpyKit CS]', ...args)
@@ -73,7 +73,7 @@ function resolveAppsJsonUrl(): string {
     const m = src.match(/\/cdn\/shop\/t\/(\d+)\//)
     if (m?.[1]) return `${window.location.origin}/cdn/shop/t/${m[1]}/assets/apps.json`
   }
-  return APPS_JSON_URL
+  return APPS_CATALOG_JSON_URL
 }
 
 async function runStandaloneDetectorInContent(): Promise<{
@@ -84,12 +84,12 @@ async function runStandaloneDetectorInContent(): Promise<{
   let appsJsonUrl = dynamicAppsJsonUrl
 
   let response = await fetch(appsJsonUrl, { cache: 'no-store' })
-  if (!response.ok && appsJsonUrl !== APPS_JSON_URL) {
+  if (!response.ok && appsJsonUrl !== APPS_CATALOG_JSON_URL) {
     console.log('[SpyKit CS] apps.json not found on current store, falling back to canonical catalog', {
       tried: appsJsonUrl,
       status: response.status,
     })
-    appsJsonUrl = APPS_JSON_URL
+    appsJsonUrl = APPS_CATALOG_JSON_URL
     response = await fetch(appsJsonUrl, { cache: 'no-store' })
   }
   if (!response.ok) {
@@ -371,6 +371,10 @@ function sendStoreContacts() {
 function runFullShopScan(opts: { fromForce?: boolean } = {}): void {
   if (!isShopify()) return
 
+  // Page-world posts `PAGE_DATA` (theme + raw theme). Run it before any slow work
+  // (standalone app detector) so the cache gets a theme row while that work runs.
+  ensurePageWorld()
+
   try {
     chrome.runtime.sendMessage({
       type: 'STORE_DETECTED',
@@ -381,7 +385,6 @@ function runFullShopScan(opts: { fromForce?: boolean } = {}): void {
     /* ignore */
   }
 
-  ensurePageWorld()
   void fetchAndSendShopMeta()
   if (opts.fromForce) {
     sendStoreContacts()
@@ -400,10 +403,11 @@ async function runFullShopScanAndWaitForResult(): Promise<{
   apps: MsgPageData['payload']['apps']
   result: Record<string, unknown> | null
 }> {
+  runFullShopScan()
   const { result, apps } = await runStandaloneDetectorInContent()
   latestStandaloneResult = result
   latestDetectedApps = apps
-  runFullShopScan()
+  ensurePageWorld()
   return { apps, result }
 }
 
@@ -515,6 +519,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   }
   void (async () => {
     try {
+      runFullShopScan({ fromForce: true })
       try {
         const { result, apps } = await runStandaloneDetectorInContent()
         latestStandaloneResult = result
@@ -522,7 +527,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       } catch {
         /* ignore and continue with page-world/theme refresh */
       }
-      runFullShopScan({ fromForce: true })
+      ensurePageWorld()
       sendResponse({ ok: true })
     } catch (e) {
       sendResponse({ ok: false, error: String(e) })

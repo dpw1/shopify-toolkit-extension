@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { CatalogProductRow, StoreInfo } from '../../types'
+import type { CatalogProductRow, ExtMessage, StoreInfo } from '../../types'
 import type { PageId } from '../components/Nav'
 import {
   ArrowUpRight,
@@ -16,9 +16,12 @@ import {
   Package,
   Palette,
   Puzzle,
+  RefreshCw,
   Store,
   Video,
 } from 'lucide-react'
+import { emitSpykitToast } from '../lib/spykitToastBus'
+import { useSpykitStore } from '../store/useSpykitStore'
 import './storesTab.css'
 import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
 import {
@@ -29,6 +32,7 @@ import {
 } from '../components/CountryFlag'
 import { ShipsToFlag } from '../components/ShipsToFlag'
 import { appendUtmToUrl } from '../lib/appendUtm'
+import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 
@@ -142,6 +146,7 @@ function SocialSvg({ platform }: { platform: string }) {
 }
 
 interface OverviewPageProps {
+  storefrontEligibility: StorefrontEligibility
   storeInfo: StoreInfo | null
   storeInfoLoaded: boolean
   /** Current IndexedDB catalog lengths (same source as Products tab). */
@@ -157,7 +162,18 @@ function fmt(n: number) {
   return n.toLocaleString()
 }
 
+function formatRelative(t: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
+  return `${Math.floor(h / 24)} day(s) ago`
+}
+
 export default function OverviewPage({
+  storefrontEligibility,
   storeInfo,
   storeInfoLoaded,
   catalogProductCount,
@@ -166,6 +182,14 @@ export default function OverviewPage({
   onNavigate,
 }: OverviewPageProps) {
   const [copied, setCopied] = useState(false)
+  const lastFetchedAt = useSpykitStore((s) => s.lastFetchedAt)
+
+  function onReSync() {
+    try {
+      emitSpykitToast('Re-syncing catalog…')
+      chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
+    } catch { /* no-op */ }
+  }
 
   const shopMeta  = storeInfo?.shopMeta
   const contacts  = storeInfo?.storeContacts
@@ -252,6 +276,26 @@ export default function OverviewPage({
     setTimeout(() => setCopied(false), 2000)
   }
 
+  if (storefrontEligibility === 'checking') {
+    return <StoreTabSkeleton />
+  }
+
+  if (storefrontEligibility === 'ineligible') {
+    return (
+      <div className="stores-tab">
+        <div className="not-connected">
+          <Store size={40} />
+          <p>This page is not a Shopify storefront.</p>
+          <p className="not-connected-detail">
+            SpyKit checks the tab you have open for <code>window.Shopify.theme</code>. That value only
+            exists on a live Shopify shop. Open your store (or any Shopify storefront) in this tab,
+            then open SpyKit again.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if (!storeInfoLoaded) {
     return <StoreTabSkeleton />
   }
@@ -279,7 +323,7 @@ export default function OverviewPage({
                 <h2>{storeName}</h2>
                 <span className="badge-active">
                   <span className="dot" />
-                  Active
+                  Shopify detected
                 </span>
               </div>
               <div className="store-links">
@@ -303,6 +347,18 @@ export default function OverviewPage({
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="store-data-fetch">
+            {lastFetchedAt != null && (
+              <span className="store-data-fetch-time">
+                Updated {formatRelative(lastFetchedAt)}
+              </span>
+            )}
+            <button type="button" className="re-scrape" onClick={onReSync} title="Re-sync catalog data">
+              <RefreshCw size={12} strokeWidth={2} />
+              Re-sync
+            </button>
           </div>
         </div>
 

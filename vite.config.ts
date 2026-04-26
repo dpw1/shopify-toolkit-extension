@@ -3,9 +3,12 @@ import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
 import { crx } from '@crxjs/vite-plugin'
 import manifest from './manifest.config'
+import catalogDefaults from './src/config/appsCatalog.defaults.json'
 
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const appsCatalogJsonUrl =
+    env['VITE_APPS_CATALOG_JSON_URL']?.trim() || catalogDefaults.appsCatalogJsonFallbackUrl
   // Fixed port so HMR WebSocket URL matches the HTTP dev server (extension pages run on chrome-extension://).
   const devPort = Number(env['VITE_DEV_PORT'] || 5173)
 
@@ -21,6 +24,7 @@ export default defineConfig(({ mode, command }) => {
       __APP_MODE__: JSON.stringify(mode),
       __APP_VERSION__: JSON.stringify(process.env['npm_package_version'] ?? '1.0.0'),
       __API_BASE_URL__: JSON.stringify(env['VITE_API_BASE_URL'] ?? ''),
+      __APPS_CATALOG_JSON_URL__: JSON.stringify(appsCatalogJsonUrl),
     },
 
     build: {

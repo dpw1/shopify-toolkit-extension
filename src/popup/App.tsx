@@ -5,6 +5,7 @@ import Footer from './components/Footer'
 import ToastStack from './components/ToastStack'
 import SettingsModal from './components/SettingsModal'
 import { useStoreInfo } from './hooks/useStoreInfo'
+import { useSpykitStore } from './store/useSpykitStore'
 import OverviewPage from './pages/OverviewPage'
 import ThemePage from './pages/ThemePage'
 import AppsPage from './pages/AppsPage'
@@ -25,7 +26,18 @@ export default function App() {
   const [spykitSettingsOpen, setSpykitSettingsOpen] = useState(false)
 
   const readyRef = useRef(false)
-  const { storeInfo, storeInfoLoaded, products, collections } = useStoreInfo()
+
+  // Kick off the full data load pipeline → writes into Zustand store
+  useStoreInfo()
+
+  // Read everything from the Zustand store
+  const storeInfo = useSpykitStore((s) => s.storeInfo)
+  const storeInfoLoaded = useSpykitStore((s) => s.storeInfoLoaded)
+  const products = useSpykitStore((s) => s.products)
+  const collections = useSpykitStore((s) => s.collections)
+  const storefrontEligibility = useSpykitStore((s) => s.storefrontEligibility)
+
+  const tabsEnabled = storefrontEligibility === 'eligible'
 
   useEffect(() => {
     void loadPopupSettings().then((s) => {
@@ -112,6 +124,12 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!tabsEnabled && settings.activeTab !== 'store') {
+      updateSettings({ activeTab: 'store' })
+    }
+  }, [tabsEnabled, settings.activeTab, updateSettings])
+
   return (
     <div className="app-container">
       <ToastStack />
@@ -123,6 +141,7 @@ export default function App() {
       <Header onOpenSettings={() => setSpykitSettingsOpen(true)} />
       <Nav
         activePage={settings.activeTab}
+        tabsEnabled={tabsEnabled}
         onNavigate={(page: PageId) => {
           updateSettings({ activeTab: page })
         }}
@@ -130,6 +149,7 @@ export default function App() {
       <main className="content">
         <div className={`view${settings.activeTab === 'store' ? ' active' : ''}`}>
           <OverviewPage
+            storefrontEligibility={storefrontEligibility}
             storeInfo={storeInfo}
             storeInfoLoaded={storeInfoLoaded}
             catalogProductCount={products.length}
@@ -148,7 +168,14 @@ export default function App() {
           <ThemePage storeInfo={storeInfo} />
         </div>
         <div className={`view${settings.activeTab === 'apps' ? ' active' : ''}`}>
-          <AppsPage storeInfo={storeInfo} />
+          <AppsPage
+            storeInfo={storeInfo}
+            storeInfoLoaded={storeInfoLoaded}
+            persistedExpandedAppKey={settings.appsExpandedAppKey}
+            persistedScrollY={settings.appsScrollY}
+            onPersistAppsState={(patch) => updateSettings(patch)}
+            isActive={settings.activeTab === 'apps'}
+          />
         </div>
         <div className={`view${settings.activeTab === 'scraper' ? ' active' : ''}`}>
           {settingsReady && (

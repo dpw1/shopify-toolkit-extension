@@ -19,6 +19,8 @@ export type PageId =
 interface NavProps {
   activePage: PageId
   onNavigate: (page: PageId) => void
+  /** When false, tabs are non-interactive (e.g. active tab is not a Shopify storefront). */
+  tabsEnabled?: boolean
 }
 
 const navItems: Array<{ id: PageId; label: string; Icon: typeof Home }> = [
@@ -30,9 +32,10 @@ const navItems: Array<{ id: PageId; label: string; Icon: typeof Home }> = [
   { id: 'export', label: 'Export', Icon: FileOutput },
 ]
 
-export default function Nav({ activePage, onNavigate }: NavProps) {
+export default function Nav({ activePage, onNavigate, tabsEnabled = true }: NavProps) {
   function keyActivate(fn: () => void) {
     return (e: KeyboardEvent) => {
+      if (!tabsEnabled) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         fn()
@@ -46,10 +49,14 @@ export default function Nav({ activePage, onNavigate }: NavProps) {
         <div
           key={id}
           role="tab"
-          tabIndex={0}
+          tabIndex={tabsEnabled ? 0 : -1}
           aria-selected={activePage === id}
-          className={`tab${activePage === id ? ' active' : ''}`}
-          onClick={() => onNavigate(id)}
+          aria-disabled={!tabsEnabled}
+          className={`tab${activePage === id ? ' active' : ''}${!tabsEnabled ? ' tab--disabled' : ''}`}
+          onClick={() => {
+            if (!tabsEnabled) return
+            onNavigate(id)
+          }}
           onKeyDown={keyActivate(() => onNavigate(id))}
         >
           <Icon strokeWidth={2} />

@@ -5,7 +5,8 @@
  */
 
 const _origFetch = window.fetch.bind(window)
-const APPS_JSON_URL = 'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json'
+/** Injected at build time from `src/config/appsCatalog.defaults.json` (+ optional `VITE_APPS_CATALOG_JSON_URL`). */
+const APPS_JSON_URL = __APPS_CATALOG_JSON_URL__
 
 function resolveAppsJsonUrl() {
   const scripts = Array.from(document.querySelectorAll('script[src]'))
