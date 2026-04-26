@@ -41,7 +41,8 @@ export default defineManifest((env) => ({
 
   content_scripts: [
     {
-      matches: ['*://*.myshopify.com/*', 'https://*/*'],
+      // Include `http://*/*` so local / non-TLS storefronts get the bridge (Theme debug, scans).
+      matches: ['*://*.myshopify.com/*', 'https://*/*', 'http://*/*'],
       js: ['src/content/index.ts'],
       run_at: 'document_idle',
     },
@@ -52,7 +53,7 @@ export default defineManifest((env) => ({
       // page-world injected script — compiled to assets/page-world.js by Rollup.
       // Content script loads it via chrome.runtime.getURL('assets/page-world.js').
       resources: ['assets/page-world.js'],
-      matches: ['*://*.myshopify.com/*', 'https://*/*'],
+      matches: ['*://*.myshopify.com/*', 'https://*/*', 'http://*/*'],
     },
     {
       resources: ['icons/*'],
@@ -64,6 +65,7 @@ export default defineManifest((env) => ({
     'storage',
     'activeTab',
     'tabs',
+    'windows',
     'scripting',
     'offscreen',
   ],
@@ -75,6 +77,8 @@ export default defineManifest((env) => ({
       ? (['http://127.0.0.1/*', 'http://localhost/*'] as const)
       : []),
     '*://*.myshopify.com/*',
+    'https://*/*',
+    'http://*/*',
     '*://*/products.json',
     '*://*/collections.json',
   ],

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { CatalogProductRow, ExtMessage, StoreInfo } from '../../types'
+import type { CatalogProductRow, StoreInfo } from '../../types'
 import type { PageId } from '../components/Nav'
 import {
   ArrowUpRight,
+  Bug,
   Check,
   Clock,
   Copy,
@@ -21,7 +22,6 @@ import {
   Video,
 } from 'lucide-react'
 import { emitSpykitToast } from '../lib/spykitToastBus'
-import { useSpykitStore } from '../store/useSpykitStore'
 import './storesTab.css'
 import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
 import {
@@ -35,6 +35,13 @@ import { appendUtmToUrl } from '../lib/appendUtm'
 import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
+import {
+  loadPopupStoreBundle,
+  requestFullStoreRefreshFromPopup,
+  spykitDebugFetchAllFromActiveTab,
+} from '../lib/popupStoreLoader'
+import { syncPopupStoreData } from '../windowStoreData'
+import { useSpykitStore } from '../store/useSpykitStore'
 
 /** Shown until the popup receives the first `GET_STORE_INFO` response. */
 function StoreTabSkeleton() {
@@ -162,6 +169,17 @@ function fmt(n: number) {
   return n.toLocaleString()
 }
 
+async function pullSpykitBundleIntoZustand() {
+  const bundle = await loadPopupStoreBundle()
+  const si = bundle?.storeInfo ?? null
+  await syncPopupStoreData(si)
+  const p = bundle?.products ?? window.storeData?.products ?? []
+  const c = bundle?.collections ?? window.storeData?.collections ?? []
+  useSpykitStore.getState().setStoreInfo(si)
+  useSpykitStore.getState().setProducts(p)
+  useSpykitStore.getState().setCollections(c)
+}
+
 function formatRelative(t: number): string {
   const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
   if (s < 60) return 'just now'
@@ -182,13 +200,78 @@ export default function OverviewPage({
   onNavigate,
 }: OverviewPageProps) {
   const [copied, setCopied] = useState(false)
-  const lastFetchedAt = useSpykitStore((s) => s.lastFetchedAt)
+  const [reSyncBusy, setReSyncBusy] = useState(false)
+  const [debugBusy, setDebugBusy] = useState(false)
+  /** Latest time data was pulled from storefront HTTP (meta.json / catalog), not popup read time. */
+  const sourceDataUpdatedAt = Math.max(
+    storeInfo?.shopMetaSourceFetchedAt ?? 0,
+    storeInfo?.catalogSourceFetchedAt ?? 0,
+  )
 
-  function onReSync() {
+  async function onReSync() {
+    console.log('[SpyKit Popup] Overview Re-sync: clicked')
+    setReSyncBusy(true)
+    emitSpykitToast('Re-syncing store, theme, apps, and catalog…')
     try {
-      emitSpykitToast('Re-syncing catalog…')
-      chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
-    } catch { /* no-op */ }
+      const res = await requestFullStoreRefreshFromPopup()
+      console.log('[SpyKit Popup] Overview Re-sync: FORCE_REFRESH result', res)
+      if (!res.ok) {
+        emitSpykitToast(res.error ? `Re-sync failed: ${res.error}` : 'Re-sync failed — try again on the storefront tab.')
+        return
+      }
+      const w = window as unknown as { spykitLoadStore?: () => Promise<unknown> }
+      console.log('[SpyKit Popup] Overview Re-sync: calling spykitLoadStore…')
+      await w.spykitLoadStore?.()
+      console.log('[SpyKit Popup] Overview Re-sync: spykitLoadStore finished')
+    } finally {
+      setReSyncBusy(false)
+    }
+  }
+
+  async function onDebugTheme() {
+    setDebugBusy(true)
+    try {
+      const r = await spykitDebugFetchAllFromActiveTab()
+      if (!r.ok) {
+        emitSpykitToast(`Debug theme failed: ${r.error}`)
+        console.warn('[SpyKit Popup] debug: theme failed', r)
+        return
+      }
+      console.log('[SpyKit Popup] debug: theme (page world / Shopify.theme)', {
+        domain: r.domain,
+        source: r.source,
+        theme: r.theme,
+        shopifyThemeRaw: r.shopifyThemeRaw,
+        appsAlsoDetected: r.apps.length,
+      })
+      await new Promise((x) => setTimeout(x, 200))
+      await pullSpykitBundleIntoZustand()
+    } finally {
+      setDebugBusy(false)
+    }
+  }
+
+  async function onDebugApps() {
+    setDebugBusy(true)
+    try {
+      const r = await spykitDebugFetchAllFromActiveTab()
+      if (!r.ok) {
+        emitSpykitToast(`Debug apps failed: ${r.error}`)
+        console.warn('[SpyKit Popup] debug: apps failed', r)
+        return
+      }
+      console.log('[SpyKit Popup] debug: apps (popup-side catalog + DOM snapshot)', {
+        domain: r.domain,
+        source: r.source,
+        apps: r.apps,
+        totalDetected: r.apps.length,
+        themeAlsoDetected: r.theme?.name,
+      })
+      await new Promise((x) => setTimeout(x, 200))
+      await pullSpykitBundleIntoZustand()
+    } finally {
+      setDebugBusy(false)
+    }
   }
 
   const shopMeta  = storeInfo?.shopMeta
@@ -350,12 +433,18 @@ export default function OverviewPage({
           </div>
 
           <div className="store-data-fetch">
-            {lastFetchedAt != null && (
+            {sourceDataUpdatedAt > 0 && (
               <span className="store-data-fetch-time">
-                Updated {formatRelative(lastFetchedAt)}
+                Updated {formatRelative(sourceDataUpdatedAt)}
               </span>
             )}
-            <button type="button" className="re-scrape" onClick={onReSync} title="Re-sync catalog data">
+            <button
+              type="button"
+              className="re-scrape"
+              disabled={reSyncBusy}
+              onClick={() => void onReSync()}
+              title="Clear cache and re-fetch meta, theme, apps, contacts, and catalog"
+            >
               <RefreshCw size={12} strokeWidth={2} />
               Re-sync
             </button>
@@ -374,7 +463,9 @@ export default function OverviewPage({
               <Palette size={14} className="stat-icon purple" />
               Theme
             </div>
-            <div className="stat-value">{themeName}</div>
+            <div className="stat-value">
+              {reSyncBusy ? <span className="stat-value-skeleton" aria-hidden /> : themeName}
+            </div>
             <div className="stat-link">Details &rsaquo;</div>
           </div>
 
@@ -388,7 +479,9 @@ export default function OverviewPage({
               <Puzzle size={14} className="stat-icon blue" />
               Apps
             </div>
-            <div className="stat-value">{fmt(appsCount)}</div>
+            <div className="stat-value">
+              {reSyncBusy ? <span className="stat-value-skeleton" aria-hidden /> : fmt(appsCount)}
+            </div>
             <div className="stat-link">View &rsaquo;</div>
           </div>
 
@@ -579,6 +672,36 @@ export default function OverviewPage({
           )}
         </div>
 
+      </div>
+
+      <p className="section-title store-debug-section-title">
+        <Bug size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+        Debug
+      </p>
+      <div className="store-debug-panel">
+        <p className="store-debug-hint">
+          Runs against the last-focused normal window tab (storefront). Results sync to cache and Zustand; details log here.
+        </p>
+        <div className="store-debug-actions">
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugTheme()}
+            title="Inject / rerun page-world: read window.Shopify.theme → PAGE_DATA → storage"
+          >
+            Theme
+          </button>
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugApps()}
+            title="Content script: fetch apps.json catalog + scan DOM/scripts → merge into PAGE_DATA"
+          >
+            Apps
+          </button>
+        </div>
       </div>
     </div>
   )

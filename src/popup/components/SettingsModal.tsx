@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import type { ExtMessage } from '../../types'
 import { emitSpykitToast } from '../lib/spykitToastBus'
+import { requestFullStoreRefreshFromPopup } from '../lib/popupStoreLoader'
 
 type Props = {
   open: boolean
@@ -27,22 +27,7 @@ export default function SettingsModal({ open, onClose, storeDomainHint }: Props)
   async function handleFetchData() {
     emitSpykitToast('Refreshing this store — clearing cache and re-fetching…')
     try {
-      const res = await new Promise<{ ok?: boolean; error?: string }>((resolve) => {
-        try {
-          chrome.runtime.sendMessage(
-            { type: 'FORCE_REFRESH_STORE', from: 'popup' } satisfies ExtMessage,
-            (r) => {
-              if (chrome.runtime.lastError) {
-                resolve({ ok: false, error: chrome.runtime.lastError.message })
-                return
-              }
-              resolve((r as { ok?: boolean; error?: string }) ?? { ok: false })
-            },
-          )
-        } catch (e) {
-          resolve({ ok: false, error: String(e) })
-        }
-      })
+      const res = await requestFullStoreRefreshFromPopup()
       if (!res.ok) {
         emitSpykitToast(res.error ? `Refresh failed: ${res.error}` : 'Refresh failed — try again on the store tab.')
       } else {

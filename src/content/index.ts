@@ -10,7 +10,7 @@
  *  2. On demand: inject page-world, collect store data, relay `PAGE_DATA` / etc.
  */
 
-import type { ExtMessage, MsgPageData, ShopMetaJson, StoreContacts } from '../types'
+import type { ExtMessage, MsgPageData, ShopMetaJson, ShopifyApp, StoreContacts } from '../types'
 import { APPS_CATALOG_JSON_URL } from '../config/appsCatalog'
 
 declare const __APP_MODE__: string
@@ -61,7 +61,8 @@ let canonicalDomain: string = location.hostname
 
 type PageWorldState = 'off' | 'loading' | 'ready'
 let pageWorldState: PageWorldState = 'off'
-let latestDetectedApps: MsgPageData['payload']['apps'] | null = null
+/** Set after `runStandaloneDetectorInContent`; `undefined` = do not overwrite cached apps on PAGE_DATA relay. */
+let latestDetectedApps: ShopifyApp[] | undefined = undefined
 let latestStandaloneResult: Record<string, unknown> | null = null
 
 // ─── Page-world injection ────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ function resolveAppsJsonUrl(): string {
 
 async function runStandaloneDetectorInContent(): Promise<{
   result: Record<string, unknown>
-  apps: MsgPageData['payload']['apps']
+  apps: ShopifyApp[]
 }> {
   const dynamicAppsJsonUrl = resolveAppsJsonUrl()
   let appsJsonUrl = dynamicAppsJsonUrl
@@ -266,7 +267,7 @@ async function runStandaloneDetectorInContent(): Promise<{
   console.log('[SpyKit CS] app-standalone result', result)
   return {
     result: result as Record<string, unknown>,
-    apps: detectedApps as MsgPageData['payload']['apps'],
+    apps: detectedApps as ShopifyApp[],
   }
 }
 
@@ -400,7 +401,7 @@ function runFullShopScan(opts: { fromForce?: boolean } = {}): void {
 }
 
 async function runFullShopScanAndWaitForResult(): Promise<{
-  apps: MsgPageData['payload']['apps']
+  apps: ShopifyApp[]
   result: Record<string, unknown> | null
 }> {
   runFullShopScan()
@@ -440,6 +441,25 @@ function ensurePageWorld(): void {
   log('Injected page-world script')
 }
 
+/** Next `PAGE_DATA` posted by injected `page-world.js` (not the content relay). */
+function waitForNextInjectedPageData(timeoutMs: number): Promise<MsgPageData['payload']> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => {
+      window.removeEventListener('message', onMsg)
+      reject(new Error(`timeout after ${timeoutMs}ms waiting for PAGE_DATA from page world`))
+    }, timeoutMs)
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.source !== window || !ev.data || ev.data.__spykit !== true) return
+      const msg = ev.data as ExtMessage
+      if (msg.type !== 'PAGE_DATA' || msg.from !== 'injected') return
+      window.clearTimeout(t)
+      window.removeEventListener('message', onMsg)
+      resolve((msg as MsgPageData).payload)
+    }
+    window.addEventListener('message', onMsg)
+  })
+}
+
 // ─── Message bridge (page → content → background) ────────────────────────────
 
 window.addEventListener('message', (event) => {
@@ -457,6 +477,12 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'PAGE_DATA') {
     const m = msg as MsgPageData
     const p = m.payload
+    const mergedApps =
+      latestDetectedApps !== undefined
+        ? latestDetectedApps
+        : p.apps && p.apps.length > 0
+          ? p.apps
+          : undefined
     // Do not spread `event.data` — it includes `__spykit`; send a clean MV3 message.
     // Store display name comes from `/meta.json` (`SHOP_META`), not meta author.
     chrome.runtime.sendMessage({
@@ -465,7 +491,7 @@ window.addEventListener('message', (event) => {
       payload: {
         domain: p.domain,
         theme: p.theme,
-        apps: latestDetectedApps ?? p.apps,
+        ...(mergedApps !== undefined ? { apps: mergedApps } : {}),
         productCount: p.productCount,
         collectionCount: p.collectionCount,
         catalogLoading: p.catalogLoading,
@@ -485,6 +511,158 @@ window.addEventListener('message', (event) => {
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const m = message as { type?: string }
+  if (m?.type === 'SPYKIT_CS_PING') {
+    sendResponse({ ok: true, spykit: true } as const)
+    return false
+  }
+  if (m?.type === 'SPYKIT_FETCH_PAGE_CONTEXT') {
+    void (async () => {
+      try {
+        // ── 1. DOM snapshot (isolated world has full DOM access) — sync, no network ──
+        const scriptSrcs = Array.from(
+          document.querySelectorAll<HTMLScriptElement>('script[src]'),
+        )
+          .map((s) => s.src)
+          .filter(Boolean)
+
+        const linkHrefs = Array.from(
+          document.querySelectorAll<HTMLLinkElement>('link[href]'),
+        )
+          .map((l) => {
+            const resolved = l.href
+            const attr = l.getAttribute('href') ?? ''
+            return resolved && resolved !== window.location.href && resolved !== 'about:blank'
+              ? resolved
+              : attr
+          })
+          .filter(Boolean)
+
+        const inlineScripts = Array.from(
+          document.querySelectorAll<HTMLScriptElement>('script:not([src])'),
+        )
+          .map((s) => s.textContent?.slice(0, 3_000) ?? '')
+          .filter(Boolean)
+
+        const headHtml = document.head?.innerHTML ?? ''
+
+        // ── 2. MAIN world globals (window.Shopify) via page-world bridge ──
+        // Register the listener BEFORE calling ensurePageWorld so we don't miss the event.
+        const pageDataPromise = waitForNextInjectedPageData(12_000)
+        ensurePageWorld()
+        const pageData = await pageDataPromise
+
+        try {
+          sendResponse({
+            ok: true,
+            domain: pageData.domain,
+            theme: pageData.theme,
+            shopifyThemeRaw: pageData.shopifyThemeRaw,
+            scriptSrcs,
+            linkHrefs,
+            inlineScripts,
+            headHtml,
+            url: location.href,
+          } as const)
+        } catch {
+          /* message channel already closed */
+        }
+      } catch (e) {
+        try {
+          sendResponse({ ok: false, error: String(e) } as const)
+        } catch {
+          /* message channel already closed */
+        }
+      }
+    })()
+    return true
+  }
+  if (m?.type === 'SPYKIT_DEBUG_FETCH_THEME') {
+    if (!isShopify()) {
+      sendResponse({ ok: false, error: 'not_shopify' } as const)
+      return false
+    }
+    void (async () => {
+      try {
+        const payloadPromise = waitForNextInjectedPageData(25_000)
+        ensurePageWorld()
+        const payload = await payloadPromise
+        try {
+          sendResponse({
+            ok: true,
+            theme: payload.theme,
+            shopifyThemeRaw: payload.shopifyThemeRaw,
+            domain: payload.domain,
+          } as const)
+        } catch {
+          /* message channel already closed */
+        }
+      } catch (e) {
+        try {
+          sendResponse({ ok: false, error: String(e) } as const)
+        } catch {
+          /* message channel already closed */
+        }
+      }
+    })()
+    return true
+  }
+  if (m?.type === 'SPYKIT_DEBUG_FETCH_APPS') {
+    if (!isShopify()) {
+      sendResponse({ ok: false, error: 'not_shopify' } as const)
+      return false
+    }
+    void (async () => {
+      let responded = false
+      const reply = (
+        out:
+          | {
+              ok: true
+              apps: ShopifyApp[]
+              domain: string
+              standaloneResult: Record<string, unknown> | null
+            }
+          | { ok: false; error: string },
+      ) => {
+        if (responded) return
+        responded = true
+        try {
+          sendResponse(out)
+        } catch {
+          /* message channel already closed */
+        }
+      }
+      try {
+        const { apps, result } = await runStandaloneDetectorInContent()
+        latestStandaloneResult = result
+        latestDetectedApps = apps
+        const payload = await new Promise<MsgPageData['payload']>((resolve, reject) => {
+          const t = window.setTimeout(() => {
+            window.removeEventListener('message', onMsg)
+            reject(new Error('timeout waiting for PAGE_DATA after app scan'))
+          }, 25_000)
+          function onMsg(ev: MessageEvent) {
+            if (ev.source !== window || !ev.data || ev.data.__spykit !== true) return
+            const msg = ev.data as ExtMessage
+            if (msg.type !== 'PAGE_DATA' || msg.from !== 'injected') return
+            window.clearTimeout(t)
+            window.removeEventListener('message', onMsg)
+            resolve((msg as MsgPageData).payload)
+          }
+          window.addEventListener('message', onMsg)
+          ensurePageWorld()
+        })
+        reply({
+          ok: true,
+          apps: latestDetectedApps ?? [],
+          domain: payload.domain,
+          standaloneResult: result,
+        })
+      } catch (e) {
+        reply({ ok: false, error: String(e) })
+      }
+    })()
+    return true
+  }
   if (m?.type === 'SPYKIT_DEBUG_HEAD_HTML') {
     try {
       const html = document.querySelector('head')?.innerHTML ?? ''
@@ -505,10 +683,18 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     }
     void runFullShopScanAndWaitForResult()
       .then(({ apps, result }) => {
-        sendResponse({ ok: true, apps, result } as const)
+        try {
+          sendResponse({ ok: true, apps, result } as const)
+        } catch {
+          /* message channel already closed */
+        }
       })
       .catch((e) => {
-        sendResponse({ ok: false, error: String(e) } as const)
+        try {
+          sendResponse({ ok: false, error: String(e) } as const)
+        } catch {
+          /* message channel already closed */
+        }
       })
     return true
   }
@@ -528,9 +714,17 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
         /* ignore and continue with page-world/theme refresh */
       }
       ensurePageWorld()
-      sendResponse({ ok: true })
+      try {
+        sendResponse({ ok: true })
+      } catch {
+        /* message channel already closed */
+      }
     } catch (e) {
-      sendResponse({ ok: false, error: String(e) })
+      try {
+        sendResponse({ ok: false, error: String(e) })
+      } catch {
+        /* message channel already closed */
+      }
     }
   })()
   return true

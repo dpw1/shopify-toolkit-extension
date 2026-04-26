@@ -185,6 +185,8 @@ export interface SpyKitStoreData {
   productCount: number
   collectionCount: number
   catalogLoading: boolean
+  /** While collection membership is being merged into product rows (filters wait on this). */
+  catalogLinkingCollections?: boolean
   detectedAt?: number
   /** Rows loaded from IndexedDB for the active shop domain (source of truth). */
   products: CatalogProductRow[]
@@ -223,6 +225,12 @@ export interface StoreInfo {
   collectionsSample?: CatalogCollectionRow[]
   /** Full API payloads exist in IndexedDB for this domain when true. */
   catalogFullDataInIndexedDb?: boolean
+  /** True while collection `…/products.json` fetches run to attach `_collections` on products. */
+  catalogLinkingCollections?: boolean
+  /** When `/meta.json` was last applied from the storefront (background, network time). */
+  shopMetaSourceFetchedAt?: number
+  /** When catalog storefront JSON fetches last finished (background, network time). */
+  catalogSourceFetchedAt?: number
   /** Social links + emails scraped from the store's storefront DOM. */
   storeContacts?: StoreContacts
 }
@@ -245,8 +253,14 @@ export interface StoreCacheMeta {
   productCount: number
   collectionCount: number
   catalogLoading?: boolean
+  /** True while attaching per-product collection handles after main catalog rows are in IDB. */
+  catalogLinkingCollections?: boolean
   /** True once IDB has been populated for this domain */
   catalogFullDataInIndexedDb: boolean
+  /** Unix ms when `/meta.json` was last fetched from the shop origin (not chrome.storage write time). */
+  shopMetaSourceFetchedAt?: number
+  /** Unix ms when storefront catalog JSON fetches last completed (products/collections/linking). */
+  catalogSourceFetchedAt?: number
 }
 
 export type PopupPageId = 'store' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
@@ -308,7 +322,8 @@ export interface MsgPageData {
   payload: {
     domain: string
     theme: Partial<ShopifyTheme>
-    apps: ShopifyApp[]
+    /** Omitted when only theme/raw JSON changed so cache keeps existing app list. */
+    apps?: ShopifyApp[]
     /** Total from paginated `/products.json` in page context */
     productCount?: number
     /** Total from paginated `/collections.json` in page context */
@@ -391,6 +406,58 @@ export interface MsgSpykitDebugHeadHtml {
   payload?: { tabId?: number }
 }
 
+/** Popup/background → content: lightweight handshake (sync `sendResponse`). */
+export interface MsgSpykitCsPing {
+  type: 'SPYKIT_CS_PING'
+  from: 'popup' | 'background'
+}
+
+/**
+ * Popup → content: collect a page snapshot in one round-trip.
+ * Content script captures DOM data (isolated world) + MAIN world Shopify globals via
+ * the page-world bridge, returns everything together. The popup runs app detection itself
+ * so no long-running work stays in the content script.
+ */
+export interface MsgSpykitFetchPageContext {
+  type: 'SPYKIT_FETCH_PAGE_CONTEXT'
+  from: 'popup'
+}
+
+/** Popup → background: persist theme + apps that were detected entirely in the popup. */
+export interface MsgSpykitStoreSnapshotFromPopup {
+  type: 'SPYKIT_STORE_SNAPSHOT_FROM_POPUP'
+  from: 'popup'
+  payload: {
+    domain: string
+    theme: Partial<ShopifyTheme>
+    shopifyThemeRaw: Record<string, unknown> | null
+    apps: ShopifyApp[]
+  }
+}
+
+/** Popup → content: re-read `window.Shopify.theme` via injected page-world (stores tab debug). */
+export interface MsgSpykitDebugFetchTheme {
+  type: 'SPYKIT_DEBUG_FETCH_THEME'
+  from: 'popup'
+}
+
+/** Popup → content: run catalog + DOM app detector, merge into next `PAGE_DATA` (stores tab debug). */
+export interface MsgSpykitDebugFetchApps {
+  type: 'SPYKIT_DEBUG_FETCH_APPS'
+  from: 'popup'
+}
+
+/** Popup → background: theme read via `scripting.executeScript` when no content script is loaded. */
+export interface MsgSpykitThemeFromMainWorld {
+  type: 'SPYKIT_THEME_FROM_MAIN_WORLD'
+  from: 'popup'
+  payload: {
+    domain: string
+    theme: Partial<ShopifyTheme>
+    shopifyThemeRaw: Record<string, unknown> | null
+  }
+}
+
 /** Load full product/collection objects written during catalog sync (IndexedDB). */
 export interface MsgGetIdbCatalog {
   type: 'GET_IDB_CATALOG'
@@ -469,6 +536,12 @@ export type ExtMessage =
   | MsgForceRefreshStore
   | MsgSpykitRunShopScan
   | MsgSpykitDebugHeadHtml
+  | MsgSpykitCsPing
+  | MsgSpykitFetchPageContext
+  | MsgSpykitDebugFetchTheme
+  | MsgSpykitDebugFetchApps
+  | MsgSpykitStoreSnapshotFromPopup
+  | MsgSpykitThemeFromMainWorld
   | MsgGetIdbCatalog
   | MsgStartScrape
   | MsgExport

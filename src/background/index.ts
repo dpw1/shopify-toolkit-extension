@@ -36,6 +36,9 @@ declare const __APP_VERSION__: string
 
 const IS_DEV = __APP_MODE__ === 'development'
 
+/** One catalog sync per domain at a time (popup may send SYNC twice in quick succession). */
+const catalogSyncInFlightByDomain = new Map<string, Promise<void>>()
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function log(...args: unknown[]) {
@@ -103,6 +106,39 @@ function normalizeThemePayload(raw: Partial<ShopifyTheme> | undefined): ShopifyT
   }
 }
 
+/** Merge theme (+ optional apps) into `storeCacheByDomain` — shared by `PAGE_DATA` and popup MAIN-world inject. */
+async function persistStoreThemeFromPagePayload(
+  domain: string,
+  themeRaw: Partial<ShopifyTheme> | undefined,
+  rawThemeObj: Record<string, unknown> | null | undefined,
+  apps: ShopifyApp[] | undefined,
+): Promise<void> {
+  const key = normalizeStoreDomainKey(domain)
+  const map = await loadCacheMap()
+  const existing = map[key] ?? null
+
+  const theme = normalizeThemePayload(themeRaw)
+  const shopifyThemeRaw = rawThemeObj !== undefined ? rawThemeObj : (existing?.shopifyThemeRaw ?? null)
+  const nameFromShopMeta =
+    existing?.shopMeta && typeof existing.shopMeta.name === 'string'
+      ? existing.shopMeta.name.trim()
+      : ''
+
+  const patch: Partial<StoreCacheMeta> = {
+    domain: key,
+    theme,
+    shopifyThemeRaw,
+    storeName: nameFromShopMeta || existing?.storeName,
+    detectedAt: Date.now(),
+    cachedAt: existing?.cachedAt ?? Date.now(),
+  }
+  if (apps !== undefined) {
+    patch.apps = apps
+  }
+
+  await saveCacheMeta(domain, patch, existing)
+}
+
 // ─── Per-store cache helpers ──────────────────────────────────────────────────
 
 /**
@@ -123,7 +159,10 @@ function storeInfoToMeta(info: StoreInfo, key: string): StoreCacheMeta {
     productCount: info.productCount ?? 0,
     collectionCount: info.collectionCount ?? 0,
     catalogLoading: info.catalogLoading,
+    catalogLinkingCollections: info.catalogLinkingCollections,
     catalogFullDataInIndexedDb: info.catalogFullDataInIndexedDb ?? false,
+    shopMetaSourceFetchedAt: info.shopMetaSourceFetchedAt,
+    catalogSourceFetchedAt: info.catalogSourceFetchedAt,
   }
 }
 
@@ -142,7 +181,10 @@ function metaToStoreInfo(meta: StoreCacheMeta): StoreInfo {
     detectedAt: meta.detectedAt,
     cachedAt: meta.cachedAt,
     catalogLoading: meta.catalogLoading,
+    catalogLinkingCollections: meta.catalogLinkingCollections,
     catalogFullDataInIndexedDb: meta.catalogFullDataInIndexedDb,
+    shopMetaSourceFetchedAt: meta.shopMetaSourceFetchedAt,
+    catalogSourceFetchedAt: meta.catalogSourceFetchedAt,
     // productsSample / collectionsSample intentionally omitted — popup reads IDB directly
   }
 }
@@ -308,6 +350,30 @@ async function getCanonicalDomainFromTab(tab: chrome.tabs.Tab): Promise<string |
   return urlHostname
 }
 
+/**
+ * Active tab in the last focused **normal** browser window. The extension popup is its own
+ * window; `chrome.tabs.query({ lastFocusedWindow: true })` often targets the popup and yields
+ * `no_active_tab` for storefront actions.
+ */
+async function getNormalWindowActiveTab(): Promise<chrome.tabs.Tab | null> {
+  try {
+    const w = await chrome.windows.getLastFocused({ populate: true, windowTypes: ['normal'] })
+    const t = w.tabs?.find((x) => x.active)
+    if (t?.id && t.url) {
+      try {
+        const u = new URL(t.url)
+        if (u.protocol === 'http:' || u.protocol === 'https:') return t
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* getLastFocused may fail in edge contexts */
+  }
+  const fallback = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  return fallback[0] ?? null
+}
+
 // ─── Catalog fetching ─────────────────────────────────────────────────────────
 
 interface StorefrontProductsPageJson {
@@ -317,19 +383,8 @@ interface StorefrontCollectionsPageJson {
   collections?: Array<Record<string, unknown> & { id: number }>
 }
 
-/**
- * Paginate `/products.json` and `/collections.json`, then tag each product
- * with the collection handles it belongs to.  Returns raw rows; the caller is
- * responsible for writing them to IDB (tagged with domain + cachedAt).
- */
-async function fetchCatalogFromOrigin(origin: string): Promise<{
-  productCount: number
-  products: CatalogProductRow[]
-  collectionCount: number
-  collections: CatalogCollectionRow[]
-}> {
+async function fetchCatalogProductsPages(origin: string): Promise<CatalogProductRow[]> {
   toastPopup('Fetching products.json…')
-
   const products: CatalogProductRow[] = []
   let page = 1
   while (true) {
@@ -353,9 +408,11 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
     page++
     if (items.length < 250) break
   }
+  return products
+}
 
+async function fetchCatalogCollectionsPages(origin: string): Promise<CatalogCollectionRow[]> {
   toastPopup('Fetching collections.json…')
-
   const collections: CatalogCollectionRow[] = []
   let cPage = 1
   while (true) {
@@ -376,10 +433,15 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
     cPage++
     if (items.length < 250) break
   }
+  return collections
+}
 
+/** Per-product collection handles from each collection's `products.json` pagination. */
+async function buildProductCollectionHandlesMap(
+  origin: string,
+  collections: CatalogCollectionRow[],
+): Promise<Map<number, string[]>> {
   toastPopup('Linking products to collections…')
-
-  // Tag each product with the collection handles it appears in
   const productCollectionsMap = new Map<number, string[]>()
   for (const col of collections) {
     const handle = String(col.handle ?? '')
@@ -401,32 +463,19 @@ async function fetchCatalogFromOrigin(origin: string): Promise<{
       const colItems = colData.products ?? []
       if (!colItems.length) break
       for (const p of colItems) {
-        const existing = productCollectionsMap.get(p.id) ?? []
-        if (!existing.includes(handle)) existing.push(handle)
-        productCollectionsMap.set(p.id, existing)
+        const cur = productCollectionsMap.get(p.id) ?? []
+        if (!cur.includes(handle)) cur.push(handle)
+        productCollectionsMap.set(p.id, cur)
       }
       pPage++
       if (colItems.length < 250) break
     }
   }
-
-  const taggedProducts = products.map((p) => ({
-    ...p,
-    _collections: productCollectionsMap.get(p.id) ?? [],
-  }))
-
-  console.log('[SpyKit BG] catalog totals', { products: products.length, collections: collections.length })
-  return {
-    productCount: taggedProducts.length,
-    products: taggedProducts,
-    collectionCount: collections.length,
-    collections,
-  }
+  return productCollectionsMap
 }
 
 async function syncCatalogFromActiveTab(): Promise<void> {
-  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  const tab = tabs[0]
+  const tab = await getNormalWindowActiveTab()
   if (!tab?.url) {
     log('SYNC_CATALOG: no active tab url')
     return
@@ -444,38 +493,91 @@ async function syncCatalogFromActiveTab(): Promise<void> {
   const domain = await getCanonicalDomainFromTab(tab)
   if (!domain) return
 
-  const map = await loadCacheMap()
-  const existing = map[normalizeStoreDomainKey(domain)] ?? null
+  const key = normalizeStoreDomainKey(domain)
+  const inFlight = catalogSyncInFlightByDomain.get(key)
+  if (inFlight) {
+    log('SYNC_CATALOG: join in-flight sync for', key)
+    await inFlight
+    return
+  }
 
-  // Mark as loading
-  await saveCacheMeta(domain, { catalogLoading: true }, existing)
+  const work = (async () => {
+    let map = await loadCacheMap()
+    let existing = map[key] ?? null
 
+    await saveCacheMeta(domain, { catalogLoading: true, catalogLinkingCollections: false }, existing)
+
+    try {
+      const products = await fetchCatalogProductsPages(origin)
+      const collections = await fetchCatalogCollectionsPages(origin)
+
+      const partialFetchedAt = Date.now()
+      const productsWithoutLinks = products.map((p) => ({
+        ...p,
+        _collections: [] as string[],
+      }))
+      await dbPutManyTagged(STORE_PRODUCTS, productsWithoutLinks, domain, partialFetchedAt)
+      await dbPutManyTagged(STORE_COLLECTIONS, collections, domain, partialFetchedAt)
+
+      map = await loadCacheMap()
+      existing = map[key] ?? null
+      await saveCacheMeta(
+        domain,
+        {
+          productCount: products.length,
+          collectionCount: collections.length,
+          catalogLoading: false,
+          catalogLinkingCollections: true,
+          catalogFullDataInIndexedDb: false,
+          catalogSourceFetchedAt: partialFetchedAt,
+        },
+        existing,
+      )
+
+      const handleMap = await buildProductCollectionHandlesMap(origin, collections)
+      const taggedProducts = products.map((p) => ({
+        ...p,
+        _collections: handleMap.get(p.id) ?? [],
+      }))
+
+      const finalFetchedAt = Date.now()
+      await dbPutManyTagged(STORE_PRODUCTS, taggedProducts, domain, finalFetchedAt)
+
+      map = await loadCacheMap()
+      existing = map[key] ?? null
+      await saveCacheMeta(
+        domain,
+        {
+          productCount: taggedProducts.length,
+          collectionCount: collections.length,
+          catalogLoading: false,
+          catalogLinkingCollections: false,
+          catalogFullDataInIndexedDb: true,
+          catalogSourceFetchedAt: finalFetchedAt,
+          cachedAt: finalFetchedAt,
+        },
+        existing,
+      )
+      log('syncCatalog done', { domain, productCount: taggedProducts.length, collectionCount: collections.length })
+      toastPopup('Catalog sync complete')
+    } catch (err) {
+      console.error('[SpyKit BG] syncCatalogFromActiveTab', err)
+      map = await loadCacheMap()
+      existing = map[key] ?? null
+      await saveCacheMeta(
+        domain,
+        { catalogLoading: false, catalogLinkingCollections: false },
+        existing,
+      )
+      toastPopup('Catalog sync failed')
+    }
+  })()
+
+  catalogSyncInFlightByDomain.set(key, work)
   try {
-    const { productCount, products, collectionCount, collections } =
-      await fetchCatalogFromOrigin(origin)
-
-    const cachedAt = Date.now()
-    // Write products + collections to IDB, tagged with domain + cachedAt
-    await dbPutManyTagged(STORE_PRODUCTS, products, domain, cachedAt)
-    await dbPutManyTagged(STORE_COLLECTIONS, collections, domain, cachedAt)
-
-    await saveCacheMeta(
-      domain,
-      {
-        productCount,
-        collectionCount,
-        catalogLoading: false,
-        catalogFullDataInIndexedDb: true,
-        cachedAt,
-      },
-      existing,
-    )
-    log('syncCatalog done', { domain, productCount, collectionCount })
-    toastPopup('Catalog sync complete')
-  } catch (err) {
-    console.error('[SpyKit BG] syncCatalogFromActiveTab', err)
-    await saveCacheMeta(domain, { catalogLoading: false }, existing)
-    toastPopup('Catalog sync failed')
+    await work
+  } finally {
+    catalogSyncInFlightByDomain.delete(key)
   }
 }
 
@@ -572,32 +674,32 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
   if (msg.type === 'PAGE_DATA') {
     const { domain, theme: themeRaw, apps, shopifyThemeRaw: rawThemeObj } = msg.payload
     void (async () => {
-      const key = normalizeStoreDomainKey(domain)
-      const map = await loadCacheMap()
-      const existing = map[key] ?? null
-
-      const theme = normalizeThemePayload(themeRaw)
-      const shopifyThemeRaw = rawThemeObj !== undefined ? rawThemeObj : (existing?.shopifyThemeRaw ?? null)
-      const nameFromShopMeta =
-        existing?.shopMeta && typeof existing.shopMeta.name === 'string'
-          ? existing.shopMeta.name.trim()
-          : ''
-
-      await saveCacheMeta(
-        domain,
-        {
-          domain: key,
-          theme,
-          apps: apps as ShopifyApp[],
-          shopifyThemeRaw,
-          storeName: nameFromShopMeta || existing?.storeName,
-          detectedAt: Date.now(),
-          cachedAt: existing?.cachedAt ?? Date.now(),
-        },
-        existing,
-      )
-      log('Stored PAGE_DATA for', key, { theme: theme?.name })
+      await persistStoreThemeFromPagePayload(domain, themeRaw, rawThemeObj, apps)
+      log('Stored PAGE_DATA for', normalizeStoreDomainKey(domain), {
+        theme: normalizeThemePayload(themeRaw)?.name,
+      })
     })()
+  }
+
+  if (msg.type === 'SPYKIT_THEME_FROM_MAIN_WORLD' && msg.from === 'popup') {
+    const { domain, theme, shopifyThemeRaw } = msg.payload
+    void (async () => {
+      await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, undefined)
+      log('Stored theme (MAIN inject) for', normalizeStoreDomainKey(domain))
+    })()
+    return false
+  }
+
+  if (msg.type === 'SPYKIT_STORE_SNAPSHOT_FROM_POPUP' && msg.from === 'popup') {
+    const { domain, theme, shopifyThemeRaw, apps } = msg.payload
+    void (async () => {
+      await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, apps)
+      log('Stored snapshot (popup-detected) for', normalizeStoreDomainKey(domain), {
+        theme: theme?.name,
+        apps: apps.length,
+      })
+    })()
+    return false
   }
 
   if (msg.type === 'SHOP_META') {
@@ -609,12 +711,14 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
       const nameFromJson =
         shopMeta && typeof shopMeta.name === 'string' ? shopMeta.name.trim() : ''
 
+      const fetchedAt = Date.now()
       await saveCacheMeta(
         domain,
         {
           shopMeta,
           storeName: nameFromJson || existing?.storeName,
           cachedAt: existing?.cachedAt ?? Date.now(),
+          shopMetaSourceFetchedAt: fetchedAt,
         },
         existing,
       )
@@ -684,7 +788,7 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
         const tab =
           typeof requestedTabId === 'number'
             ? await chrome.tabs.get(requestedTabId).catch(() => undefined)
-            : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
+            : await getNormalWindowActiveTab()
         if (!tab?.id) {
           sendResponse({ ok: false, error: 'no_active_tab' })
           return
@@ -708,7 +812,7 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
         const tab =
           typeof requestedTabId === 'number'
             ? await chrome.tabs.get(requestedTabId).catch(() => undefined)
-            : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
+            : await getNormalWindowActiveTab()
         if (!tab?.id) {
           sendResponse({ ok: false, error: 'no_active_tab' })
           return
@@ -728,7 +832,7 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
   if (msg.type === 'FORCE_REFRESH_STORE' && msg.from === 'popup') {
     void (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+        const tab = await getNormalWindowActiveTab()
         if (!tab?.id) {
           sendResponse({ ok: false, error: 'no_active_tab' })
           return
@@ -754,9 +858,8 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
         } catch {
           /* tab may not have our content script (non-store URL) */
         }
-        void syncCatalogFromActiveTab().catch((err) =>
-          console.error('[SpyKit BG] FORCE_REFRESH_STORE sync', err),
-        )
+        // Catalog sync: popup calls `spykitLoadStore` → `fetchAllData` → `SYNC_CATALOG_ON_POPUP`
+        // once. Avoid running `syncCatalogFromActiveTab` here too (duplicate fetches / logs).
         sendResponse({ ok: true })
       } catch (e) {
         sendResponse({ ok: false, error: String(e) })

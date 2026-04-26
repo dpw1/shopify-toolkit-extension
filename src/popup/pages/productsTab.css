@@ -1151,6 +1151,27 @@
   color: var(--text-muted);
 }
 
+.products-tab .filter-collections-linking {
+  padding: 10px 8px;
+}
+
+.products-tab .filter-collections-linking-skel {
+  display: block;
+  height: 10px;
+  width: 72%;
+  border-radius: 4px;
+  background: var(--border-color);
+  animation: pt-skeleton-pulse 1.1s ease-in-out infinite;
+  margin-bottom: 10px;
+}
+
+.products-tab .filter-collections-linking-text {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-light);
+  line-height: 1.45;
+}
+
 /* page-btn disabled state */
 .products-tab .page-controls .page-btn:disabled {
   opacity: 0.35;

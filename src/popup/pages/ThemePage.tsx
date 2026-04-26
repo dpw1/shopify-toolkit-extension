@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { StoreInfo } from '../../types'
-import { APPS_CATALOG_JSON_URL } from '../../config/appsCatalog'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
+import {
+  loadThemeWithJsonCatalog,
+  type ThemeJsonEntry,
+  type ThemeJsonReviews,
+} from '../lib/themeJsonCatalog'
 import {
   ArrowUpRight,
   FileText,
@@ -18,34 +22,6 @@ import {
 
 interface ThemePageProps {
   storeInfo: StoreInfo | null
-}
-
-type ThemeJsonReviews = {
-  totalReviews?: number
-  positiveCount?: number
-  neutralCount?: number
-  negativeCount?: number
-  reviewURL?: string
-}
-
-type ThemeJsonEntry = {
-  themeURL?: string
-  title?: string
-  price?: string
-  description?: string
-  creator?: string
-  livedemo?: string
-  liveDemo?: string
-  live_demo?: string
-  demoURL?: string
-  desktopImage?: string
-  mobileImage?: string
-  fetch_date?: string
-  reviews?: ThemeJsonReviews
-  /** legacy keys */
-  themeName?: string
-  themePrice?: string
-  img?: string
 }
 
 /**
@@ -103,75 +79,30 @@ function ThemeSentimentStars({ rating }: { rating: number }) {
   )
 }
 
-function normName(v: string): string {
-  return v.trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-async function resolveVersionedThemesJsonUrl(domain: string, themeId: number): Promise<string | null> {
-  void domain
-  void themeId
-  return APPS_CATALOG_JSON_URL
-}
-
 export default function ThemePage({ storeInfo }: ThemePageProps) {
   const t = getResolvedThemeForUI(storeInfo)
   const displayName = t?.name ?? '—'
-  const domain = storeInfo?.domain?.replace(/^https?:\/\//, '') ?? ''
-  const themeId = t?.themeId ?? (typeof storeInfo?.shopifyThemeRaw?.id === 'number' ? storeInfo.shopifyThemeRaw.id : null)
   const [themeListEntry, setThemeListEntry] = useState<ThemeJsonEntry | null>(null)
 
   useEffect(() => {
+    const ac = new AbortController()
     let cancelled = false
     setThemeListEntry(null)
-    if (!domain || !themeId) return
 
     void (async () => {
       try {
-        const url = await resolveVersionedThemesJsonUrl(domain, themeId)
-        if (!url) {
-          console.log('[SpyKit Theme] themes.json URL not found (requires ?v= asset URL)')
-          return
-        }
-        const res = await fetch(url, { credentials: 'omit' })
-        if (!res.ok) return
-        const data = (await res.json()) as Record<string, ThemeJsonEntry>
-        const candidates = [
-          displayName,
-          t?.schemaName ?? '',
-          t?.themeRenamed ?? '',
-        ]
-          .map(normName)
-          .filter(Boolean)
-        let picked: ThemeJsonEntry | null = null
-        for (const [key, value] of Object.entries(data)) {
-          const k = normName(key)
-          const title = normName(value.title ?? value.themeName ?? '')
-          if (candidates.includes(k) || (title && candidates.includes(title))) {
-            picked = value
-            break
-          }
-        }
-        if (!picked) {
-          const byKey = data[displayName] ?? data[t?.schemaName ?? ''] ?? data[t?.themeRenamed ?? '']
-          if (byKey) picked = byKey
-        }
-        console.log('[SpyKit Theme] matched theme from themes.json:', {
-          domain,
-          themeId,
-          themesJsonUrl: url,
-          displayName,
-          matched: picked ?? null,
-        })
-        if (!cancelled) setThemeListEntry(picked ?? null)
+        const { catalogEntry } = await loadThemeWithJsonCatalog(storeInfo, ac.signal)
+        if (!cancelled) setThemeListEntry(catalogEntry)
       } catch {
-        /* silent */
+        if (!cancelled) setThemeListEntry(null)
       }
     })()
 
     return () => {
       cancelled = true
+      ac.abort()
     }
-  }, [domain, themeId, displayName, t?.schemaName, t?.themeRenamed])
+  }, [storeInfo])
 
   const themeStoreUrl = themeListEntry?.themeURL ? appendUtmToUrl(themeListEntry.themeURL) : null
   const rawLiveDemoUrl =

@@ -60,6 +60,12 @@
   text-decoration: underline;
 }
 
+.stores-tab .re-scrape:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 .stores-tab .store-logo {
   width: 52px;
   height: 52px;
@@ -615,4 +621,52 @@
   border-radius: var(--radius-sm);
   background: var(--border-dark);
   animation: st-sk-pulse 1.15s ease-in-out infinite;
+}
+
+/* Stores tab — dev debug panel */
+.stores-tab .store-debug-section-title {
+  display: flex;
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.stores-tab .store-debug-panel {
+  margin-top: 0.35rem;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-dark);
+  background: var(--bg-body);
+}
+
+.stores-tab .store-debug-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
+
+.stores-tab .store-debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stores-tab .store-debug-btn {
+  font-size: var(--text-sm);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-dark);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.stores-tab .store-debug-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.stores-tab .store-debug-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

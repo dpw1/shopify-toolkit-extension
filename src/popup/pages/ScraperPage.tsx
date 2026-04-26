@@ -158,6 +158,7 @@ function FilterModal({
   vendors,
   types,
   collections,
+  collectionsLinking,
   onClose,
   onReset,
 }: {
@@ -172,6 +173,8 @@ function FilterModal({
   vendors: string[]
   types: string[]
   collections: CollectionRow[]
+  /** While BG fetches per-collection `products.json` to fill filter membership — list waits, main table does not. */
+  collectionsLinking: boolean
   onClose: () => void
   onReset: () => void
 }) {
@@ -240,24 +243,37 @@ function FilterModal({
             <div className="filter-section-label">Collections</div>
             <details className="filter-multi">
               <summary className="filter-multi-summary">
-                {catalogFilters.length ? `${catalogFilters.length} selected` : 'All collections'}
+                {collectionsLinking
+                  ? 'Linking collections…'
+                  : catalogFilters.length
+                    ? `${catalogFilters.length} selected`
+                    : 'All collections'}
               </summary>
               <div className="filter-multi-list">
-                {collections.map((c) => {
-                  const checked = catalogFilters.includes(c.handle)
-                  const disabled = c.productCount <= 0
-                  return (
-                    <label key={c.id} className={`filter-check-row${disabled ? ' is-disabled' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggleCatalogFilter(c.handle)}
-                      />
-                      <span>{c.name} ({c.productCount})</span>
-                    </label>
-                  )
-                })}
+                {collectionsLinking ? (
+                  <div className="filter-collections-linking" role="status">
+                    <span className="filter-collections-linking-skel" aria-hidden />
+                    <p className="filter-collections-linking-text">
+                      Matching products to collections — product list is already available.
+                    </p>
+                  </div>
+                ) : (
+                  collections.map((c) => {
+                    const checked = catalogFilters.includes(c.handle)
+                    const disabled = c.productCount <= 0
+                    return (
+                      <label key={c.id} className={`filter-check-row${disabled ? ' is-disabled' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleCatalogFilter(c.handle)}
+                        />
+                        <span>{c.name} ({c.productCount})</span>
+                      </label>
+                    )
+                  })
+                )}
               </div>
             </details>
           </div>
@@ -619,6 +635,7 @@ export default function ScraperPage({
           vendors={vendors}
           types={types}
           collections={collectionRows}
+          collectionsLinking={storeInfo?.catalogLinkingCollections === true}
           onClose={() => setShowFilters(false)}
           onReset={resetFilters}
         />
