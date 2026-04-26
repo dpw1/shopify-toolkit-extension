@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CatalogCollectionRow, CatalogProductRow, StoreInfo } from '../../types'
 import { onStorageChange } from '../../lib/storage'
-import { loadPopupStoreBundle } from '../lib/popupStoreLoader'
+import { loadPopupStoreBundle, requestContentShopScanFromPopup } from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
 
 /**
@@ -50,6 +50,8 @@ export function useStoreInfo(): {
       if (!cancelled) setStoreInfoLoaded(true)
     }
 
+    // One run per popup open: ask the content script to scan the storefront (not on every storage/IDB refresh).
+    requestContentShopScanFromPopup()
     void runLoad()
 
     const unsub = onStorageChange('storeCacheByDomain', () => {

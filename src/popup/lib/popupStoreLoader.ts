@@ -18,6 +18,44 @@ import { emitSpykitToast } from './spykitToastBus'
 
 const RESOLVE_RETRY_MS = [0, 150, 350]
 
+/**
+ * Popup → Background trigger for the on-demand Shopify scan.
+ * Background forwards it to the active tab content script and relays status.
+ */
+export function requestContentShopScanFromPopup(): void {
+  try {
+    console.log('[SpyKit Popup] starting app detection...')
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id
+      chrome.runtime.sendMessage(
+        {
+          type: 'SPYKIT_RUN_SHOP_SCAN',
+          from: 'popup',
+          payload: { tabId },
+        } satisfies ExtMessage,
+        (res: unknown) => {
+          // Debug: print raw standalone detector `result` object from content/page-world.
+          const r = res as { ok?: boolean; result?: unknown; error?: string } | undefined
+          debugger
+          if (r?.ok) {
+            console.log('[SpyKit Popup] app-standalone result', {
+              hasResult: r.result != null,
+              result: r.result ?? null,
+            })
+          } else if (r?.error) {
+            const expectedNoReceiver = r.error.toLowerCase().includes('receiving end does not exist')
+            if (!expectedNoReceiver) {
+              console.warn('[SpyKit Popup] SPYKIT_RUN_SHOP_SCAN error:', r.error)
+            }
+          }
+        },
+      )
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
 // ─── Step 1: domain ───────────────────────────────────────────────────────────
 
 /**

@@ -1,18 +1,20 @@
 /**
  * Content script — runs in the isolated world on matching pages.
  *
- * Steps:
- *  1. Detect whether this is a Shopify store (check window.Shopify or meta tags).
- *  2. If yes, inject page-world.js into the page world so it can read
- *     unredacted window.Shopify globals and intercept fetch/XHR.
- *  3. Listen for messages from the injected script (via window.postMessage)
- *     and relay them to the background service worker.
+ * Does **not** run theme/app/meta/contact collection on page load. The popup (or
+ * a manual cache refresh) sends `SPYKIT_RUN_SHOP_SCAN` / `SPYKIT_FORCE_REFRESH`,
+ * which injects `page-world.js` once, fetches `meta.json`, runs the app detector,
+ * and scans contacts — same work as before, but only when the user opens SpyKit.
+ *
+ *  1. Bridge `postMessage` from the injected main-world script to the service worker.
+ *  2. On demand: inject page-world, collect store data, relay `PAGE_DATA` / etc.
  */
 
 import type { ExtMessage, MsgPageData, ShopMetaJson, StoreContacts } from '../types'
 
 declare const __APP_MODE__: string
 const IS_DEV = __APP_MODE__ === 'development'
+const APPS_JSON_URL = 'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json'
 
 function log(...args: unknown[]) {
   if (IS_DEV) console.log('[SpyKit CS]', ...args)
@@ -57,12 +59,221 @@ function isShopify(): boolean {
  */
 let canonicalDomain: string = location.hostname
 
+type PageWorldState = 'off' | 'loading' | 'ready'
+let pageWorldState: PageWorldState = 'off'
+let latestDetectedApps: MsgPageData['payload']['apps'] | null = null
+let latestStandaloneResult: Record<string, unknown> | null = null
+
 // ─── Page-world injection ────────────────────────────────────────────────────
+
+function resolveAppsJsonUrl(): string {
+  const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'))
+  for (const s of scripts) {
+    const src = s.src || ''
+    const m = src.match(/\/cdn\/shop\/t\/(\d+)\//)
+    if (m?.[1]) return `${window.location.origin}/cdn/shop/t/${m[1]}/assets/apps.json`
+  }
+  return APPS_JSON_URL
+}
+
+async function runStandaloneDetectorInContent(): Promise<{
+  result: Record<string, unknown>
+  apps: MsgPageData['payload']['apps']
+}> {
+  const dynamicAppsJsonUrl = resolveAppsJsonUrl()
+  let appsJsonUrl = dynamicAppsJsonUrl
+
+  let response = await fetch(appsJsonUrl, { cache: 'no-store' })
+  if (!response.ok && appsJsonUrl !== APPS_JSON_URL) {
+    console.log('[SpyKit CS] apps.json not found on current store, falling back to canonical catalog', {
+      tried: appsJsonUrl,
+      status: response.status,
+    })
+    appsJsonUrl = APPS_JSON_URL
+    response = await fetch(appsJsonUrl, { cache: 'no-store' })
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to fetch app catalog: ${response.status} ${response.statusText}`)
+  }
+  const appCatalog = (await response.json()) as any[]
+  if (!Array.isArray(appCatalog)) {
+    throw new Error('Invalid app catalog format: expected an array')
+  }
+
+  const allScripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script'))
+  const allLinks = Array.from(document.querySelectorAll<HTMLLinkElement>('link[href]'))
+  const detectedApps: any[] = []
+  const detectedByKey = new Map<string, any>()
+
+  const getAppName = (app: any) =>
+    app.appTitle || app.name || (app.id != null ? `App #${String(app.id)}` : 'Unknown App')
+
+  const getAppCategory = (app: any) => {
+    const category = app.category
+    if (typeof category === 'string' && category.trim() !== '') return category
+    const categoriesJson = app.categoriesJson
+    if (typeof categoriesJson === 'string' && categoriesJson.trim() !== '') {
+      try {
+        const parsed = JSON.parse(categoriesJson)
+        if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') return parsed[0]
+      } catch {
+        /* ignore */
+      }
+    }
+    return 'Uncategorized'
+  }
+
+  const getAppPatterns = (app: any) =>
+    Array.isArray(app.patterns) ? app.patterns.map((p: unknown) => String(p)) : []
+
+  const getAppKey = (app: any) => (app.id != null ? String(app.id) : getAppName(app))
+
+  const matchCatalogApp = (srcOrContent: string) => {
+    const lower = String(srcOrContent).toLowerCase()
+    for (const app of appCatalog) {
+      for (const p of getAppPatterns(app)) {
+        if (lower.includes(String(p).toLowerCase())) return app
+      }
+    }
+    return null
+  }
+
+  const domDetectionScripts = (app: any) => {
+    const selectors = Array.isArray(app.domSelectors) ? app.domSelectors : []
+    const parts = []
+    for (const selector of selectors) {
+      try {
+        const count = document.querySelectorAll(String(selector)).length
+        if (count > 0) parts.push(`(DOM: ${count} x ${String(selector)})`)
+      } catch {
+        /* ignore */
+      }
+    }
+    return parts
+  }
+
+  const getMatchingScriptSrcs = (app: any) => {
+    const srcs: string[] = []
+    for (const pattern of getAppPatterns(app)) {
+      const normalizedPattern = String(pattern).toLowerCase()
+      allScripts.forEach((script) => {
+        if (script.getAttribute('src') == null) return
+        const src = script.src || ''
+        if (!src || !src.toLowerCase().includes(normalizedPattern)) return
+        srcs.push(src)
+      })
+      allLinks.forEach((link) => {
+        const hrefAttr = link.getAttribute('href')
+        if (hrefAttr == null || hrefAttr === '') return
+        const resolved = link.href || ''
+        if (!resolved.toLowerCase().includes(normalizedPattern) && !hrefAttr.toLowerCase().includes(normalizedPattern)) {
+          return
+        }
+        srcs.push(resolved || hrefAttr || '(link)')
+      })
+    }
+    return [...new Set(srcs)]
+  }
+
+  const addOrMergeDetectedApp = (app: any, scriptsToAdd: string[]) => {
+    const appKey = getAppKey(app)
+    const appName = getAppName(app)
+    const appCategory = getAppCategory(app)
+    const appStoreUrl = app.sourceAppUrl || null
+    const appIconUrl = app.appIconUrl || null
+
+    if (!detectedByKey.has(appKey)) {
+      const entry = {
+        ...app,
+        id: app.id != null ? app.id : null,
+        name: appName,
+        category: appCategory,
+        sourceAppUrl: appStoreUrl,
+        appIconUrl,
+        scripts: [],
+      }
+      detectedApps.push(entry)
+      detectedByKey.set(appKey, entry)
+    }
+
+    const entry = detectedByKey.get(appKey)
+    const existing = new Set(Array.isArray(entry.scripts) ? entry.scripts : [])
+    for (const s of scriptsToAdd) {
+      if (typeof s === 'string' && s !== '' && !existing.has(s)) {
+        entry.scripts.push(s)
+        existing.add(s)
+      }
+    }
+  }
+
+  for (const app of appCatalog) {
+    const matchingSrcs = getMatchingScriptSrcs(app)
+    const domScripts = domDetectionScripts(app)
+    const scripts = matchingSrcs.concat(domScripts)
+    if (scripts.length > 0) addOrMergeDetectedApp(app, scripts)
+  }
+
+  const unknownSrcSet = new Set<string>()
+  allScripts.forEach((script) => {
+    if (!script.src) return
+    const src = script.src
+    const isShopify = src.includes('shopify.com') && (src.includes('extensions') || src.includes('proxy') || src.includes('apps'))
+    const hasShop = src.includes('.js') && src.includes('?shop=')
+    if (!isShopify && !hasShop) return
+    unknownSrcSet.add(src)
+  })
+  unknownSrcSet.forEach((src) => {
+    const matchedApp = matchCatalogApp(src)
+    if (matchedApp) addOrMergeDetectedApp(matchedApp, [src])
+  })
+
+  const sectionStoreCount = document.querySelectorAll("[id*='shopify-section'] > [class*='_ss_'][class*='section-template']").length
+  if (sectionStoreCount > 0) {
+    addOrMergeDetectedApp(
+      { id: 'sections-store-dom', appTitle: 'Sections Store', category: 'Page Builders' },
+      [`(DOM: ${sectionStoreCount} section-template elements)`],
+    )
+  }
+
+  const totalStylesheets = document.querySelectorAll("link[rel='stylesheet']").length
+  const headScripts = document.head ? document.head.querySelectorAll('script') : []
+  const bodyScripts = document.body ? document.body.querySelectorAll('script') : []
+  const appsObject: Record<string, unknown> = {}
+  const allDetectedScriptSrcs = new Set<string>()
+  detectedApps.forEach((app) => {
+    const scripts = Array.isArray(app.scripts) ? app.scripts : []
+    appsObject[String(app.name)] = { ...app, scripts }
+    scripts.forEach((src: any) => {
+      if (typeof src === 'string' && src.startsWith('http')) allDetectedScriptSrcs.add(src)
+    })
+  })
+
+  const result = {
+    url: window.location.href,
+    source_apps_url: appsJsonUrl,
+    catalog_total: appCatalog.length,
+    detected_apps: detectedApps,
+    apps: appsObject,
+    total_detected: detectedApps.length,
+    total_head_scripts: headScripts.length,
+    total_body_scripts: bodyScripts.length,
+    total_scripts: headScripts.length + bodyScripts.length,
+    total_stylesheets: totalStylesheets,
+    section_store_count: sectionStoreCount,
+    detected_script_srcs: Array.from(allDetectedScriptSrcs),
+  }
+
+  console.log('[SpyKit CS] app-standalone result', result)
+  return {
+    result: result as Record<string, unknown>,
+    apps: detectedApps as MsgPageData['payload']['apps'],
+  }
+}
 
 /** Shopify exposes shop metadata at the storefront root: `/meta.json`. */
 async function fetchAndSendShopMeta(): Promise<void> {
   try {
-    toastFromContent('Fetching meta.json…')
+    toastFromContent('Fetching store data…')
     const url = new URL('/meta.json', location.href).href
     const res = await fetch(url, { credentials: 'same-origin' })
     if (!res.ok) return
@@ -152,15 +363,76 @@ function sendStoreContacts() {
   }
 }
 
-function injectPageWorld() {
+/**
+ * Full Shopify-side collection: page-world (theme, lightweight apps), `meta.json`
+ * (canonical domain + shop name in background), catalog-based app detection, contacts.
+ * Call only from `SPYKIT_RUN_SHOP_SCAN` or `SPYKIT_FORCE_REFRESH`, not on load.
+ */
+function runFullShopScan(opts: { fromForce?: boolean } = {}): void {
+  if (!isShopify()) return
+
+  try {
+    chrome.runtime.sendMessage({
+      type: 'STORE_DETECTED',
+      from: 'content',
+      payload: { domain: location.hostname, tabId: 0 },
+    } satisfies ExtMessage)
+  } catch {
+    /* ignore */
+  }
+
+  ensurePageWorld()
+  void fetchAndSendShopMeta()
+  if (opts.fromForce) {
+    sendStoreContacts()
+  }
+  setTimeout(() => {
+    sendStoreContacts()
+  }, 2000)
+  if (opts.fromForce) {
+    setTimeout(() => {
+      sendStoreContacts()
+    }, 2200)
+  }
+}
+
+async function runFullShopScanAndWaitForResult(): Promise<{
+  apps: MsgPageData['payload']['apps']
+  result: Record<string, unknown> | null
+}> {
+  const { result, apps } = await runStandaloneDetectorInContent()
+  latestStandaloneResult = result
+  latestDetectedApps = apps
+  runFullShopScan()
+  return { apps, result }
+}
+
+/**
+ * First call: inject `page-world.js` (MAIN world) once. Later calls: ask it to
+ * re-read theme and post `PAGE_DATA` without stacking duplicate scripts / fetch
+ * patches.
+ */
+function ensurePageWorld(): void {
+  if (pageWorldState === 'ready') {
+    window.postMessage({ __spykit: true, type: 'SPYKIT_RERUN_PAGE_DATA' }, '*')
+    return
+  }
+  if (pageWorldState === 'loading') {
+    return
+  }
+  pageWorldState = 'loading'
   const script = document.createElement('script')
-  // Built as rollup input `page-world` → assets/page-world.js
-  // The stable entryFileNames pattern in vite.config.ts guarantees this path.
   script.src = chrome.runtime.getURL('assets/page-world.js')
   script.type = 'module'
   script.dataset['spykit'] = '1'
+  script.onload = () => {
+    script.remove()
+    pageWorldState = 'ready'
+  }
+  script.onerror = () => {
+    pageWorldState = 'off'
+  }
   ;(document.head ?? document.documentElement).appendChild(script)
-  script.onload = () => script.remove()
   log('Injected page-world script')
 }
 
@@ -189,11 +461,12 @@ window.addEventListener('message', (event) => {
       payload: {
         domain: p.domain,
         theme: p.theme,
-        apps: p.apps,
+        apps: latestDetectedApps ?? p.apps,
         productCount: p.productCount,
         collectionCount: p.collectionCount,
         catalogLoading: p.catalogLoading,
         shopifyThemeRaw: p.shopifyThemeRaw,
+        standaloneResult: latestStandaloneResult ?? p.standaloneResult ?? null,
         productsSample: p.productsSample,
         collectionsSample: p.collectionsSample,
       },
@@ -204,32 +477,37 @@ window.addEventListener('message', (event) => {
   chrome.runtime.sendMessage(msg)
 })
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
-
-function init() {
-  if (!isShopify()) {
-    log('Not a Shopify store — skipping')
-    return
-  }
-
-  const domain = location.hostname
-
-  log('Shopify store detected:', domain)
-
-  chrome.runtime.sendMessage({
-    type: 'STORE_DETECTED',
-    from: 'content',
-    payload: { domain, tabId: 0 },
-  } satisfies ExtMessage)
-
-  injectPageWorld()
-  void fetchAndSendShopMeta()
-  // Delay so lazy-loaded footer links / mailto tags are in the DOM
-  setTimeout(sendStoreContacts, 2000)
-}
+// ─── Init (no scan on page load; popup or manual refresh triggers work) ─────
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const m = message as { type?: string }
+  if (m?.type === 'SPYKIT_DEBUG_HEAD_HTML') {
+    try {
+      const html = document.querySelector('head')?.innerHTML ?? ''
+      sendResponse({
+        type: 'SPYKIT_DEBUG_HEAD_HTML_RESPONSE',
+        from: 'content',
+        payload: { html, url: location.href },
+      } satisfies ExtMessage)
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) } as const)
+    }
+    return false
+  }
+  if (m?.type === 'SPYKIT_RUN_SHOP_SCAN') {
+    if (!isShopify()) {
+      sendResponse({ ok: false, error: 'not_shopify' } as const)
+      return false
+    }
+    void runFullShopScanAndWaitForResult()
+      .then(({ apps, result }) => {
+        sendResponse({ ok: true, apps, result } as const)
+      })
+      .catch((e) => {
+        sendResponse({ ok: false, error: String(e) } as const)
+      })
+    return true
+  }
   if (m?.type !== 'SPYKIT_FORCE_REFRESH') return false
   if (!isShopify()) {
     sendResponse({ ok: false, error: 'not_shopify' })
@@ -237,10 +515,14 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   }
   void (async () => {
     try {
-      window.postMessage({ __spykit: true, type: 'SPYKIT_RERUN_PAGE_DATA' }, '*')
-      await fetchAndSendShopMeta()
-      sendStoreContacts()
-      setTimeout(sendStoreContacts, 2200)
+      try {
+        const { result, apps } = await runStandaloneDetectorInContent()
+        latestStandaloneResult = result
+        latestDetectedApps = apps
+      } catch {
+        /* ignore and continue with page-world/theme refresh */
+      }
+      runFullShopScan({ fromForce: true })
       sendResponse({ ok: true })
     } catch (e) {
       sendResponse({ ok: false, error: String(e) })
@@ -248,9 +530,3 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   })()
   return true
 })
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init)
-} else {
-  init()
-}

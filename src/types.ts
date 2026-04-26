@@ -42,10 +42,77 @@ export interface ShopifyApp {
   id: string
   name: string
   category: 'marketing' | 'sales' | 'reviews' | 'analytics' | 'other'
+  appTitle?: string
+  appDescription?: string | null
+  appIconUrl?: string | null
+  appImages?: string[]
+  viewDemoStoreUrl?: string | null
+  pricing?: {
+    plans: Array<{
+      name: string | null
+      price: string | null
+      description: string | null
+      trialInfo: string | null
+      features: string[]
+    }>
+    seeAllPricingUrl?: string | null
+  } | null
+  reviewOverallRating?: number | null
+  reviewTotal?: number | null
+  reviewByStars?: Record<string, number>
+  usersThinkSummary?: string | null
+  usersThinkIsAiGenerated?: boolean
+  reviewUrl?: string | null
+  visibleReviews?: Array<{
+    reviewId?: string | null
+    title?: string | null
+    body?: string | null
+    starsLabel?: string | null
+    merchantName?: string | null
+    yearsUsing?: string | null
+    date?: string | null
+    reviewUrl?: string | null
+    reply?: string | null
+  }>
+  moreAppsLikeThis?: Array<{
+    handle?: string | null
+    name?: string | null
+    iconUrl?: string | null
+    appUrl?: string | null
+    rating?: number | null
+    reviewCount?: number | null
+    pricingBlurb?: string | null
+    shortDescription?: string | null
+    builtForShopify?: boolean
+  }>
+  categories?: string[]
+  categoryFeatures?: Array<{
+    categoryName?: string | null
+    categoryUrl?: string | null
+    featureGroups?: Array<{
+      groupName?: string | null
+      features?: string[]
+    }>
+  }>
+  worksWithIntegrations?: string[]
+  languagesSupported?: string | null
+  developerPartnerName?: string | null
+  developerPartnerUrl?: string | null
+  developerWebsite?: string | null
+  developerAddress?: string | null
+  developerLaunchDate?: string | null
+  developerSupportEmail?: string | null
+  domSelectors?: string[]
   rating?: number
   reviewCount?: number
   iconUrl?: string
   iconBg?: string
+  /** App Store listing URL (canonical, no query) */
+  sourceAppUrl?: string
+  /** Evidence strings: script URLs or DOM match notes */
+  matchScripts?: string[]
+  /** Original catalog / store category label for display */
+  categoryLabel?: string
 }
 
 /** Slim preview rows for `chrome.storage` / `window.storeData` (cap ~100). Full bodies live in IndexedDB. */
@@ -245,6 +312,8 @@ export interface MsgPageData {
     /** When true, popup should show skeletons for catalog counts */
     catalogLoading?: boolean
     shopifyThemeRaw?: Record<string, unknown> | null
+    /** Raw `result` object returned by `samples/app-standalone.js` detector logic. */
+    standaloneResult?: Record<string, unknown> | null
     productsSample?: ProductSlim[]
     collectionsSample?: CollectionSlim[]
   }
@@ -270,6 +339,16 @@ export interface MsgStoreContacts {
   }
 }
 
+/** Content script DOM-based app detector (catalog + selectors/patterns). */
+export interface MsgAppsDetected {
+  type: 'APPS_DETECTED'
+  from: 'content'
+  payload: {
+    domain: string
+    apps: ShopifyApp[]
+  }
+}
+
 // ── Popup → Background ───────────────────────────────────────────────────────
 export interface MsgGetStoreInfo {
   type: 'GET_STORE_INFO'
@@ -288,6 +367,24 @@ export interface MsgSyncCatalogOnPopup {
 export interface MsgForceRefreshStore {
   type: 'FORCE_REFRESH_STORE'
   from: 'popup'
+}
+
+/**
+ * Popup or background → content: run the full Shopify scan (page-world, `meta.json`,
+ * app detection, store contacts). Not used on page load — only when the user opens
+ * the popup (or a manual cache refresh that triggers the same path).
+ */
+export interface MsgSpykitRunShopScan {
+  type: 'SPYKIT_RUN_SHOP_SCAN'
+  from: 'popup' | 'background'
+  payload?: { tabId?: number }
+}
+
+/** Popup → background → content: debug dump of `document.head.innerHTML`. */
+export interface MsgSpykitDebugHeadHtml {
+  type: 'SPYKIT_DEBUG_HEAD_HTML'
+  from: 'popup' | 'background'
+  payload?: { tabId?: number }
 }
 
 /** Load full product/collection objects written during catalog sync (IndexedDB). */
@@ -349,15 +446,25 @@ export interface MsgSpykitToast {
   payload: { message: string }
 }
 
+/** Background/content response for head-html debug requests. */
+export interface MsgSpykitDebugHeadHtmlResponse {
+  type: 'SPYKIT_DEBUG_HEAD_HTML_RESPONSE'
+  from: 'background' | 'content'
+  payload: { html: string; url?: string }
+}
+
 // ── Union ────────────────────────────────────────────────────────────────────
 export type ExtMessage =
   | MsgStoreDetected
   | MsgPageData
   | MsgShopMeta
   | MsgStoreContacts
+  | MsgAppsDetected
   | MsgGetStoreInfo
   | MsgSyncCatalogOnPopup
   | MsgForceRefreshStore
+  | MsgSpykitRunShopScan
+  | MsgSpykitDebugHeadHtml
   | MsgGetIdbCatalog
   | MsgStartScrape
   | MsgExport
@@ -367,6 +474,7 @@ export type ExtMessage =
   | MsgError
   | MsgCatalogIdbResponse
   | MsgSpykitToast
+  | MsgSpykitDebugHeadHtmlResponse
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage schema (chrome.storage.local keys)

@@ -56,6 +56,21 @@ function toastPopup(message: string) {
   void storageSet({ spykitToast: { message, at: Date.now() } })
 }
 
+function isNoReceiverError(err: unknown): boolean {
+  return String(err).toLowerCase().includes('receiving end does not exist')
+}
+
+async function sendToTabWithRetry(tabId: number, message: ExtMessage): Promise<unknown> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message)
+  } catch (e) {
+    if (!isNoReceiverError(e)) throw e
+    // Content script can be missing briefly on freshly loaded tabs.
+    await new Promise((r) => setTimeout(r, 450))
+    return await chrome.tabs.sendMessage(tabId, message)
+  }
+}
+
 /** Turn injected-script partial theme into persisted `ShopifyTheme`. */
 function normalizeThemePayload(raw: Partial<ShopifyTheme> | undefined): ShopifyTheme | null {
   if (!raw || Object.keys(raw).length === 0) return null
@@ -625,6 +640,21 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
     })()
   }
 
+  if (msg.type === 'APPS_DETECTED') {
+    const { domain, apps } = msg.payload
+    void (async () => {
+      const key = normalizeStoreDomainKey(domain)
+      const map = await loadCacheMap()
+      const existing = map[key] ?? null
+      await saveCacheMeta(
+        domain,
+        { apps: apps as ShopifyApp[], cachedAt: existing?.cachedAt ?? Date.now() },
+        existing,
+      )
+      log('Stored APPS_DETECTED for', key, { apps: apps.length })
+    })()
+  }
+
   if (msg.type === 'GET_STORE_INFO') {
     const requestedHost = msg.payload?.host
     void (async () => {
@@ -645,6 +675,54 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
 
   if (msg.type === 'SYNC_CATALOG_ON_POPUP') {
     void syncCatalogFromActiveTab().catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
+  }
+
+  if (msg.type === 'SPYKIT_RUN_SHOP_SCAN' && msg.from === 'popup') {
+    void (async () => {
+      try {
+        const requestedTabId = msg.payload?.tabId
+        const tab =
+          typeof requestedTabId === 'number'
+            ? await chrome.tabs.get(requestedTabId).catch(() => undefined)
+            : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
+        if (!tab?.id) {
+          sendResponse({ ok: false, error: 'no_active_tab' })
+          return
+        }
+        const response = await sendToTabWithRetry(tab.id, {
+          type: 'SPYKIT_RUN_SHOP_SCAN',
+          from: 'background',
+        } satisfies ExtMessage)
+        sendResponse(response ?? { ok: true })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
+    })()
+    return true
+  }
+
+  if (msg.type === 'SPYKIT_DEBUG_HEAD_HTML' && msg.from === 'popup') {
+    void (async () => {
+      try {
+        const requestedTabId = msg.payload?.tabId
+        const tab =
+          typeof requestedTabId === 'number'
+            ? await chrome.tabs.get(requestedTabId).catch(() => undefined)
+            : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
+        if (!tab?.id) {
+          sendResponse({ ok: false, error: 'no_active_tab' })
+          return
+        }
+        const response = await sendToTabWithRetry(tab.id, {
+          type: 'SPYKIT_DEBUG_HEAD_HTML',
+          from: 'background',
+        } satisfies ExtMessage)
+        sendResponse(response ?? { ok: false, error: 'no_response' })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
+    })()
+    return true
   }
 
   if (msg.type === 'FORCE_REFRESH_STORE' && msg.from === 'popup') {

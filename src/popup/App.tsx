@@ -148,7 +148,7 @@ export default function App() {
           <ThemePage storeInfo={storeInfo} />
         </div>
         <div className={`view${settings.activeTab === 'apps' ? ' active' : ''}`}>
-          <AppsPage />
+          <AppsPage storeInfo={storeInfo} />
         </div>
         <div className={`view${settings.activeTab === 'scraper' ? ' active' : ''}`}>
           {settingsReady && (

@@ -69,7 +69,35 @@ export function normalizeShipsToCountries(raw: unknown): string[] {
       .map((s) => s.trim())
       .filter(Boolean)
   }
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw)) {
+    // Some stores expose map-like shapes, e.g. { US: "United States", CA: "Canada" }.
+    if (typeof raw === 'object') {
+      const outFromObject: string[] = []
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        const key = String(k).trim()
+        const keyCode = countryToFlagCode(key)
+        if (keyCode) {
+          outFromObject.push(key)
+          continue
+        }
+        if (typeof v === 'string') {
+          const t = v.trim()
+          if (t) outFromObject.push(t)
+        } else if (v && typeof v === 'object') {
+          const o = v as Record<string, unknown>
+          for (const field of ['code', 'country_code', 'countryCode', 'alpha2', 'iso2', 'isoCode', 'name', 'label']) {
+            const fv = o[field]
+            if (typeof fv === 'string' && fv.trim()) {
+              outFromObject.push(fv.trim())
+              break
+            }
+          }
+        }
+      }
+      return Array.from(new Set(outFromObject)).filter((v) => countryToFlagCode(v) != null)
+    }
+    return []
+  }
   const out: string[] = []
   for (const item of raw) {
     if (typeof item === 'string') {

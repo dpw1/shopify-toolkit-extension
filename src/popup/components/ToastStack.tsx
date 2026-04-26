@@ -13,7 +13,11 @@ export default function ToastStack() {
 
   const push = useCallback((message: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    setItems((prev) => [...prev, { id, message }])
+    setItems((prev) => {
+      // Ignore duplicates while the same toast message is already visible.
+      if (prev.some((x) => x.message === message)) return prev
+      return [...prev, { id, message }]
+    })
     const t = window.setTimeout(() => {
       timers.current.delete(id)
       setItems((prev) => prev.filter((x) => x.id !== id))
