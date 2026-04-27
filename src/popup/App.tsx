@@ -26,6 +26,7 @@ export default function App() {
   const [spykitSettingsOpen, setSpykitSettingsOpen] = useState(false)
 
   const readyRef = useRef(false)
+  const scopedDomainAppliedRef = useRef<string | null>(null)
 
   // Kick off the full data load pipeline → writes into Zustand store
   useStoreInfo()
@@ -38,6 +39,24 @@ export default function App() {
   const storefrontEligibility = useSpykitStore((s) => s.storefrontEligibility)
 
   const tabsEnabled = storefrontEligibility === 'eligible'
+  const currentDomain = (storeInfo?.domain ?? '').trim().toLowerCase()
+
+  const toScopedPatch = useCallback((patch: Partial<PopupSettings>) => {
+    const out: Partial<PopupSettings> = {}
+    if (patch.activeTab != null) out.activeTab = patch.activeTab
+    if (patch.scrollY != null) out.scrollY = patch.scrollY
+    if (patch.appsExpandedAppKey != null) out.appsExpandedAppKey = patch.appsExpandedAppKey
+    if (patch.appsScrollY != null) out.appsScrollY = patch.appsScrollY
+    if (patch.scraperView != null) out.scraperView = patch.scraperView
+    if (patch.scraperPage != null) out.scraperPage = patch.scraperPage
+    if (patch.scraperSearch != null) out.scraperSearch = patch.scraperSearch
+    if (patch.scraperStockFilter != null) out.scraperStockFilter = patch.scraperStockFilter
+    if (patch.scraperVendorFilters != null) out.scraperVendorFilters = patch.scraperVendorFilters
+    if (patch.scraperTypeFilters != null) out.scraperTypeFilters = patch.scraperTypeFilters
+    if (patch.scraperCatalogFilters != null) out.scraperCatalogFilters = patch.scraperCatalogFilters
+    if (patch.scraperPerPage != null) out.scraperPerPage = patch.scraperPerPage
+    return out
+  }, [])
 
   useEffect(() => {
     void loadPopupSettings().then((s) => {
@@ -71,11 +90,77 @@ export default function App() {
         return cur !== v
       })
       if (!changed) return prev
+      const scopedPatch = toScopedPatch(patch)
+      const next = mergePopupSettings(prev, patch)
+      if (currentDomain && Object.keys(scopedPatch).length > 0) {
+        next.storeUiByDomain = {
+          ...(prev.storeUiByDomain ?? {}),
+          ...(next.storeUiByDomain ?? {}),
+          [currentDomain]: {
+            activeTab: next.activeTab,
+            scrollY: next.scrollY,
+            appsExpandedAppKey: next.appsExpandedAppKey,
+            appsScrollY: next.appsScrollY,
+            scraperView: next.scraperView,
+            scraperPage: next.scraperPage,
+            scraperSearch: next.scraperSearch,
+            scraperStockFilter: next.scraperStockFilter,
+            scraperVendorFilters: next.scraperVendorFilters,
+            scraperTypeFilters: next.scraperTypeFilters,
+            scraperCatalogFilters: next.scraperCatalogFilters,
+            scraperPerPage: next.scraperPerPage,
+          },
+        }
+      }
+      void persistPopupSettings(next)
+      return next
+    })
+  }, [currentDomain, toScopedPatch])
+
+  useEffect(() => {
+    if (!settingsReady) return
+    if (!currentDomain) return
+    if (scopedDomainAppliedRef.current === currentDomain) return
+
+    const scoped = settings.storeUiByDomain?.[currentDomain]
+    const patch = scoped
+      ? {
+          activeTab: scoped.activeTab,
+          scrollY: scoped.scrollY,
+          appsExpandedAppKey: scoped.appsExpandedAppKey,
+          appsScrollY: scoped.appsScrollY,
+          scraperView: scoped.scraperView,
+          scraperPage: scoped.scraperPage,
+          scraperSearch: scoped.scraperSearch,
+          scraperStockFilter: scoped.scraperStockFilter,
+          scraperVendorFilters: scoped.scraperVendorFilters,
+          scraperTypeFilters: scoped.scraperTypeFilters,
+          scraperCatalogFilters: scoped.scraperCatalogFilters,
+          scraperPerPage: scoped.scraperPerPage,
+        }
+      : {
+          activeTab: DEFAULT_POPUP_SETTINGS.activeTab,
+          scrollY: DEFAULT_POPUP_SETTINGS.scrollY,
+          appsExpandedAppKey: DEFAULT_POPUP_SETTINGS.appsExpandedAppKey,
+          appsScrollY: DEFAULT_POPUP_SETTINGS.appsScrollY,
+          scraperView: DEFAULT_POPUP_SETTINGS.scraperView,
+          scraperPage: DEFAULT_POPUP_SETTINGS.scraperPage,
+          scraperSearch: DEFAULT_POPUP_SETTINGS.scraperSearch,
+          scraperStockFilter: DEFAULT_POPUP_SETTINGS.scraperStockFilter,
+          scraperVendorFilters: DEFAULT_POPUP_SETTINGS.scraperVendorFilters,
+          scraperTypeFilters: DEFAULT_POPUP_SETTINGS.scraperTypeFilters,
+          scraperCatalogFilters: DEFAULT_POPUP_SETTINGS.scraperCatalogFilters,
+          scraperPerPage: DEFAULT_POPUP_SETTINGS.scraperPerPage,
+        }
+
+    setSettings((prev) => {
       const next = mergePopupSettings(prev, patch)
       void persistPopupSettings(next)
       return next
     })
-  }, [])
+    requestAnimationFrame(() => window.scrollTo({ top: patch.scrollY, behavior: 'auto' }))
+    scopedDomainAppliedRef.current = currentDomain
+  }, [currentDomain, settings.storeUiByDomain, settingsReady])
 
   const handlePersistScraperViewState = useCallback(
     (payload: {

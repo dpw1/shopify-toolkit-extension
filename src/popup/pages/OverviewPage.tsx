@@ -38,6 +38,7 @@ import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/h
 import {
   getShopifyThemeFromHtml,
   loadPopupStoreBundle,
+  requestCatalogSyncFromPopup,
   requestCollectionProductsLinkingFromPopup,
   requestFullStoreRefreshFromPopup,
   spykitDebugFetchAllFromActiveTab,
@@ -149,6 +150,16 @@ function SocialSvg({ platform }: { platform: string }) {
           <path d="M24.562,7.613c-1.508-.983-2.597-2.557-2.936-4.391-.073-.396-.114-.804-.114-1.221h-4.814l-.008,19.292c-.081,2.16-1.859,3.894-4.039,3.894-.677,0-1.315-.169-1.877-.465-1.288-.678-2.169-2.028-2.169-3.582,0-2.231,1.815-4.047,4.046-4.047,.417,0,.816,.069,1.194,.187v-4.914c-.391-.053-.788-.087-1.194-.087-4.886,0-8.86,3.975-8.86,8.86,0,2.998,1.498,5.65,3.783,7.254,1.439,1.01,3.19,1.606,5.078,1.606,4.886,0,8.86-3.975,8.86-8.86V11.357c1.888,1.355,4.201,2.154,6.697,2.154v-4.814c-1.345,0-2.597-.4-3.647-1.085Z"></path>
         </svg>
       )
+    case 'discord':
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M18.8943 4.34399C17.5183 3.71467 16.057 3.256 14.5317 3C14.3396 3.33067 14.1263 3.77866 13.977 4.13067C12.3546 3.89599 10.7439 3.89599 9.14391 4.13067C8.99457 3.77866 8.77056 3.33067 8.58922 3C7.05325 3.256 5.59191 3.71467 4.22552 4.34399C1.46286 8.41865 0.716188 12.3973 1.08952 16.3226C2.92418 17.6559 4.69486 18.4666 6.4346 19C6.86126 18.424 7.24527 17.8053 7.57594 17.1546C6.9466 16.92 6.34927 16.632 5.77327 16.2906C5.9226 16.184 6.07194 16.0667 6.21061 15.9493C9.68793 17.5387 13.4543 17.5387 16.889 15.9493C17.0383 16.0667 17.177 16.184 17.3263 16.2906C16.7503 16.632 16.153 16.92 15.5236 17.1546C15.8543 17.8053 16.2383 18.424 16.665 19C18.4036 18.4666 20.185 17.6559 22.01 16.3226C22.4687 11.7787 21.2836 7.83202 18.8943 4.34399ZM8.05593 13.9013C7.01058 13.9013 6.15725 12.952 6.15725 11.7893C6.15725 10.6267 6.98925 9.67731 8.05593 9.67731C9.11191 9.67731 9.97588 10.6267 9.95454 11.7893C9.95454 12.952 9.11191 13.9013 8.05593 13.9013ZM15.065 13.9013C14.0196 13.9013 13.1652 12.952 13.1652 11.7893C13.1652 10.6267 13.9983 9.67731 15.065 9.67731C16.121 9.67731 16.985 10.6267 16.9636 11.7893C16.9636 12.952 16.1317 13.9013 15.065 13.9013Z"
+            stroke="currentColor"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )
     case 'snapchat':
     case 'vimeo':
       return <Video size={15} />
@@ -208,6 +219,8 @@ export default function OverviewPage({
   const [reSyncBusy, setReSyncBusy] = useState(false)
   const [debugBusy, setDebugBusy] = useState(false)
   const [shipsToModalOpen, setShipsToModalOpen] = useState(false)
+  const [revealAgeRequested, setRevealAgeRequested] = useState(false)
+  const [revealAgeBusy, setRevealAgeBusy] = useState(false)
   /** Latest time data was pulled from storefront HTTP (meta.json / catalog), not popup read time. */
   const sourceDataUpdatedAt = Math.max(
     storeInfo?.shopMetaSourceFetchedAt ?? 0,
@@ -460,6 +473,36 @@ export default function OverviewPage({
     return earliest
   }, [catalogProducts])
 
+  async function onRevealEstimatedAge() {
+    setRevealAgeRequested(true)
+    if (revealAgeBusy) return
+    if (estimatedAge && storeInfo?.catalogFullDataInIndexedDb) return
+
+    setRevealAgeBusy(true)
+    emitSpykitToast('Fetching products to estimate age…')
+    try {
+      const syncRes = await requestCatalogSyncFromPopup()
+      if (!syncRes.ok) {
+        emitSpykitToast(syncRes.error ? `Age reveal failed: ${syncRes.error}` : 'Age reveal failed')
+        return
+      }
+
+      const startedAt = Date.now()
+      const timeoutMs = 20000
+      while (Date.now() - startedAt < timeoutMs) {
+        const bundle = await loadPopupStoreBundle()
+        const info = bundle?.storeInfo
+        const done = info?.catalogLoading !== true
+        const hasProducts = (bundle?.products?.length ?? 0) > 0
+        await pullSpykitBundleIntoZustand()
+        if (done && hasProducts) break
+        await new Promise((r) => setTimeout(r, 450))
+      }
+    } finally {
+      setRevealAgeBusy(false)
+    }
+  }
+
   function copyEmail() {
     if (!emails.length) return
     void navigator.clipboard.writeText(emails.join(', ')).catch(() => {})
@@ -549,7 +592,7 @@ export default function OverviewPage({
               title="Clear cache and re-fetch meta, theme, apps, contacts, and catalog"
             >
               <RefreshCw size={12} strokeWidth={2} />
-              Re-sync
+              Reload data
             </button>
           </div>
         </div>
@@ -597,6 +640,14 @@ export default function OverviewPage({
             <div className="stat-header">
               <Package size={14} className="stat-icon green" />
               Products
+              {catalogLoading && (
+                <RefreshCw
+                  size={12}
+                  strokeWidth={2}
+                  className="products-loading-icon"
+                  aria-label="Products loading"
+                />
+              )}
             </div>
             <div className="stat-value">
               {productsStatLoading ? (
@@ -673,7 +724,7 @@ export default function OverviewPage({
           {shipsTo.length > 0 ? (
             <div className="intel-ships-to-body" style={{ marginTop: 4 }}>
               <div className="ships-to-flags-grid">
-                {shipsTo.slice(0, 9).map((code, i) => (
+                {shipsTo.slice(0, 10).map((code, i) => (
                   <span
                     key={`${i}-${code}`}
                     className="ships-flag-chip"
@@ -683,14 +734,14 @@ export default function OverviewPage({
                   </span>
                 ))}
               </div>
-              {shipsTo.length > 9 && (
+              {shipsTo.length > 10 && (
                 <button
                   type="button"
                   className="ships-more-btn"
                   onClick={() => setShipsToModalOpen(true)}
                   title={`${shipsTo.length} countries total — click to see all`}
                 >
-                  +{shipsTo.length - 9} more
+                  +{shipsTo.length - 10} more
                 </button>
               )}
             </div>
@@ -770,7 +821,20 @@ export default function OverviewPage({
             <div className="icon gray"><Clock size={13} /></div>
             Estimated Age
           </div>
-          {estimatedAge ? (
+          {!revealAgeRequested ? (
+            <div className="estimated-age-reveal-row" style={{ marginTop: 6 }}>
+              <button
+                type="button"
+                className="estimated-age-reveal-btn"
+                onClick={() => void onRevealEstimatedAge()}
+              >
+                Reveal
+              </button>
+              <span className="badge-pro">PRO</span>
+            </div>
+          ) : revealAgeBusy ? (
+            <div className="intel-sub intel-sub--estimated-age-empty" style={{ marginTop: 4 }}>loading</div>
+          ) : estimatedAge ? (
             <div className="estimated-age-block">
               <div className="intel-value intel-value--estimated-age" style={{ marginTop: 4 }}>
                 {formatStoreAgeSummary(estimatedAge)}
@@ -780,7 +844,7 @@ export default function OverviewPage({
               </small>
             </div>
           ) : (
-            <div className="intel-sub intel-sub--estimated-age-empty" style={{ marginTop: 4 }}>—</div>
+            <div className="intel-sub intel-sub--estimated-age-empty" style={{ marginTop: 4 }}>No product publish dates found</div>
           )}
         </div>
 

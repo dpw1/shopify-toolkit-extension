@@ -63,6 +63,7 @@ export function useStoreInfo(): void {
         theme: incoming.theme ?? current?.theme ?? null,
         shopifyThemeRaw: incoming.shopifyThemeRaw ?? current?.shopifyThemeRaw ?? null,
         appDetectionResult: incoming.appDetectionResult ?? current?.appDetectionResult ?? null,
+        storeContacts: incoming.storeContacts ?? current?.storeContacts,
         // Preserve freshly-fetched shopMeta from step 3 if the bundle hasn't caught up yet.
         shopMeta: incoming.shopMeta ?? current?.shopMeta ?? null,
         productCount:
@@ -121,11 +122,14 @@ export function useStoreInfo(): void {
         theme: normalizedTheme,
         shopifyThemeRaw: snapshot.shopifyThemeRaw ?? null,
         appDetectionResult: snapshot.appDetectionResult ?? null,
+        ...(snapshot.contacts
+          ? { storeContacts: snapshot.contacts }
+          : {}),
         detectedAt: Date.now(),
       }
       setStoreInfo(merged)
       await syncPopupStoreData(merged)
-      console.log('[SpyKit Popup] Zustand snapshot (theme+apps)', useSpykitStore.getState())
+      console.log('[SpyKit Popup] Zustand snapshot (theme+apps+contacts)', useSpykitStore.getState())
     }
 
     // Merge shopMeta into current Zustand storeInfo and re-sync window.storeData.
@@ -195,6 +199,12 @@ export function useStoreInfo(): void {
         await applyMetaJson(metaRes.meta)
       }
 
+      // Store tab is considered "loaded" once theme + apps + meta.json are in.
+      // Catalog products/collections can continue syncing in the background.
+      if (!cancelled) {
+        setStoreInfoLoaded(true)
+      }
+
       // 4) Continue the canonical pipeline (IDB catalog + final cache bundle).
       const bundle = await fetchAllData((step) => {
         if (!cancelled) setFetchStep(step)
@@ -218,7 +228,6 @@ export function useStoreInfo(): void {
 
       // 6) Mark pipeline complete for UI indicators.
       if (!cancelled) {
-        setStoreInfoLoaded(true)
         setLastFetchedAt(Date.now())
         setFetchStep('done')
         console.log('[SpyKit Popup] useStoreInfo: runLoad complete')

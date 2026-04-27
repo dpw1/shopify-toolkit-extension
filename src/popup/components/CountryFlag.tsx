@@ -1,8 +1,7 @@
-import countryData from 'flag-icons/country.json'
+import { countries as supportedCountries } from 'country-flag-icons'
+import { getFlagAssetUrl } from '../lib/shipFlagUrls'
 
-type CountryRow = { name: string; code: string }
-
-/** English / Shopify-style aliases → flag-icons ISO 3166-1 alpha-2 `code` (lowercase). */
+/** English / Shopify-style aliases → ISO 3166-1 alpha-2 `code` (lowercase). */
 const EXTRA_ALIASES: Record<string, string> = {
   'united states': 'us',
   'united states of america': 'us',
@@ -18,14 +17,24 @@ const EXTRA_ALIASES: Record<string, string> = {
 
 const NAME_TO_CODE: Map<string, string> = (() => {
   const m = new Map<string, string>()
-  for (const row of countryData as CountryRow[]) {
-    m.set(row.name.toLowerCase().trim(), row.code.toLowerCase())
+  // Build a country name lookup using built-in Intl region names + supported code set.
+  const dn = new Intl.DisplayNames(['en'], { type: 'region' })
+  for (const code of supportedCountries as string[]) {
+    // Some library codes are non-standard/subdivision-like for Intl region names.
+    // `Intl.DisplayNames.of()` can throw RangeError for those; skip safely.
+    try {
+      const name = dn.of(code)
+      if (name) m.set(name.toLowerCase().trim(), code.toLowerCase())
+    } catch {
+      // no-op
+    }
   }
   for (const [k, v] of Object.entries(EXTRA_ALIASES)) {
     m.set(k, v)
   }
   return m
 })()
+const SUPPORTED_CODE_SET = new Set((supportedCountries as string[]).map((c) => c.toLowerCase()))
 
 /** Tooltip: ISO alpha-2 only (e.g. `US`). */
 export function countryCodeOnlyLabel(countryOrCode: string): string {
@@ -154,7 +163,7 @@ export function normalizeShipsToCountries(raw: unknown): string[] {
   return dedupeAndFilter(out)
 }
 
-/** Resolve Shopify / free-text country to flag-icons class suffix (e.g. `us`). */
+/** Resolve Shopify / free-text country to ISO alpha-2 code (e.g. `us`). */
 export function countryToFlagCode(input: string): string | null {
   const raw = input.trim()
   if (!raw) return null
@@ -165,10 +174,16 @@ export function countryToFlagCode(input: string): string | null {
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (/^[A-Za-z]{2}$/i.test(raw)) return raw.slice(0, 2).toLowerCase()
+  if (/^[A-Za-z]{2}$/i.test(raw)) {
+    const code = raw.slice(0, 2).toLowerCase()
+    return SUPPORTED_CODE_SET.has(code) ? code : null
+  }
   // "US - United States", "US, …", "US" at start of a token.
   const head = raw.match(/^([A-Za-z]{2})(?=$|[\s,;|\/:+\-—])/)
-  if (head?.[1]) return head[1].toLowerCase()
+  if (head?.[1]) {
+    const code = head[1].toLowerCase()
+    return SUPPORTED_CODE_SET.has(code) ? code : null
+  }
 
   // Common alpha-3 forms.
   if (/^[A-Za-z]{3}$/.test(raw)) {
@@ -202,11 +217,11 @@ export function countryToFlagCode(input: string): string | null {
       zaf: 'za',
     }
     const mapped = alpha3[raw.toLowerCase()]
-    if (mapped) return mapped
+    if (mapped && SUPPORTED_CODE_SET.has(mapped)) return mapped
   }
 
-  const fromName = NAME_TO_CODE.get(compact) ?? NAME_TO_CODE.get(stripped)
-  return fromName ?? null
+  const fromName = NAME_TO_CODE.get(compact) ?? NAME_TO_CODE.get(stripped) ?? null
+  return fromName && SUPPORTED_CODE_SET.has(fromName) ? fromName : null
 }
 
 type CountryFlagProps = {
@@ -217,13 +232,20 @@ type CountryFlagProps = {
   title?: string
 }
 
-/**
- * SVG flag from [`flag-icons`](https://www.npmjs.com/package/flag-icons) —
- * classes `fi fi-xx` (+ optional `fis` for square).
- */
+/** SVG flag from bundled `country-flag-icons` assets. */
 export function CountryFlag({ country, square = false, className = '', title }: CountryFlagProps) {
   const code = countryToFlagCode(country)
   if (!code) return null
-  const cls = ['fi', `fi-${code}`, square ? 'fis' : '', className].filter(Boolean).join(' ')
-  return <span className={cls} title={title ?? country} role="img" aria-hidden />
+  const src = getFlagAssetUrl(code, square)
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      className={className}
+      title={title ?? country}
+      alt=""
+      loading="eager"
+      decoding="sync"
+    />
+  )
 }

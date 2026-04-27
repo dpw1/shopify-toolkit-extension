@@ -17,6 +17,7 @@ import type {
   ShopMetaJson,
   ShopifyApp,
   ShopifyTheme,
+  StoreContacts,
   StoreInfo,
 } from '../../types'
 import { extractShopifyThemeMainWorld } from '../../lib/injected/extractShopifyThemeMainWorld'
@@ -168,6 +169,30 @@ export function requestFullStoreRefreshFromPopup(): Promise<{ ok?: boolean; erro
       )
     } catch (e) {
       console.warn('[SpyKit Popup] FORCE_REFRESH_STORE throw', e)
+      resolve({ ok: false, error: String(e) })
+    }
+  })
+}
+
+/** Trigger background catalog sync for the active storefront tab. */
+export function requestCatalogSyncFromPopup(): Promise<{ ok?: boolean; error?: string }> {
+  console.log('[SpyKit Popup] requestCatalogSyncFromPopup → SYNC_CATALOG_ON_POPUP')
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage,
+        (r: unknown) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[SpyKit Popup] SYNC_CATALOG_ON_POPUP lastError', chrome.runtime.lastError.message)
+            resolve({ ok: false, error: chrome.runtime.lastError.message })
+            return
+          }
+          const out = (r as { ok?: boolean; error?: string }) ?? { ok: false }
+          resolve(out)
+        },
+      )
+    } catch (e) {
+      console.warn('[SpyKit Popup] SYNC_CATALOG_ON_POPUP throw', e)
       resolve({ ok: false, error: String(e) })
     }
   })
@@ -505,30 +530,97 @@ export function extractEmailsFromHtmlString(htmlString: string): string[] {
   return [...emailsFound]
 }
 
-/**
- * Official entry point for theme + apps detection.
- * Fetches the active tab's full HTML, then runs DOMParser-based extraction
- * for both `Shopify.theme` and the app catalog — all in the popup process.
- * Persists the result to the background cache so it is visible on all tabs.
- */
-export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllResponse> {
-  emitSpykitToast('Fetching theme & apps...')
-  const htmlRes = await spykitDebugFetchHtmlFromActiveTab()
-  if (!htmlRes.ok) return { ok: false, error: htmlRes.error }
-  console.log('[SpyKit Popup] theme+apps: html fetched', {
-    url: htmlRes.url,
-    htmlLength: htmlRes.html.length,
+function extractEmailsFromDocument(doc: Document): string[] {
+  const emailBlacklist = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.ico', 'sentry.io']
+  const emailsFound = new Set<string>()
+  doc.querySelectorAll('a[href^="mailto:"]').forEach((el) => {
+    const raw = (el as HTMLAnchorElement).getAttribute('href') ?? ''
+    const email = raw.replace('mailto:', '').split('?')[0].trim().toLowerCase()
+    if (email && !email.includes('@js.') && !emailBlacklist.some((ex) => email.includes(ex))) {
+      emailsFound.add(email)
+    }
   })
+  return [...emailsFound]
+}
 
-  let domain: string
+// Social platform rules — kept in sync with content/index.ts collectStoreContacts().
+const SOCIAL_RULES: Array<{
+  platform: string
+  pattern: RegExp
+  blacklist: string[]
+}> = [
+  { platform: 'instagram', pattern: /instagram\.com\//, blacklist: ['/p/', '/reel/', '/explore/', '/stories/'] },
+  { platform: 'facebook',  pattern: /facebook\.com\//,  blacklist: ['/sharer', '/share', '/dialog/', '/watch/', '/groups/'] },
+  { platform: 'twitter',   pattern: /twitter\.com\//,   blacklist: ['/share', '/intent/', '/hashtag/'] },
+  { platform: 'x',         pattern: /x\.com\//,         blacklist: ['/share', '/intent/', '/i/'] },
+  { platform: 'tiktok',    pattern: /tiktok\.com\/@/,   blacklist: [] },
+  { platform: 'youtube',   pattern: /youtube\.com\/(channel\/|c\/|@|user\/)/, blacklist: ['/watch', '/shorts/', '/playlist', '/embed/'] },
+  { platform: 'pinterest', pattern: /pinterest\.com\//,  blacklist: ['/pin/', '/search/', '/explore/'] },
+  { platform: 'linkedin',  pattern: /linkedin\.com\/(company|in)\//, blacklist: ['/sharing/', '/share'] },
+  { platform: 'snapchat',  pattern: /snapchat\.com\/add\//, blacklist: [] },
+  { platform: 'vimeo',     pattern: /vimeo\.com\/(channels\/|groups\/|[a-zA-Z][a-zA-Z0-9]+)/, blacklist: ['/video/', '/ondemand/', '/showcase/'] },
+  { platform: 'discord',   pattern: /discord\.(gg|com\/invite)\//, blacklist: [] },
+]
+
+/**
+ * Extract social profile links from full storefront HTML.
+ * Mirrors content-script social rules + adds Discord.
+ */
+export function parseSocialFromHtmlString(htmlString: string): Record<string, string> {
+  const social: Record<string, string> = {}
   try {
-    domain = normalizeStoreDomainKey(new URL(htmlRes.url).hostname)
+    const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+    doc.querySelectorAll('a[href]').forEach((el) => {
+      const href = (el as HTMLAnchorElement).getAttribute('href') ?? ''
+      if (!href) return
+      for (const { platform, pattern, blacklist } of SOCIAL_RULES) {
+        if (social[platform]) continue
+        if (!pattern.test(href)) continue
+        if (blacklist.some((b) => href.includes(b))) continue
+        social[platform] = href
+      }
+    })
   } catch {
-    domain = normalizeStoreDomainKey(htmlRes.url)
+    // no-op
   }
+  return social
+}
 
-  // Same as debug "fetch apps": one HTML fetch, parse theme + apps from that string.
-  const rawTheme = getShopifyThemeFromHtml(htmlRes.html)
+function parseSocialFromDocument(doc: Document): Record<string, string> {
+  const social: Record<string, string> = {}
+  doc.querySelectorAll('a[href]').forEach((el) => {
+    const href = (el as HTMLAnchorElement).getAttribute('href') ?? ''
+    if (!href) return
+    for (const { platform, pattern, blacklist } of SOCIAL_RULES) {
+      if (social[platform]) continue
+      if (!pattern.test(href)) continue
+      if (blacklist.some((b) => href.includes(b))) continue
+      social[platform] = href
+    }
+  })
+  return social
+}
+
+/**
+ * Parse both emails and social links from full storefront HTML,
+ * returning a StoreContacts object ready to persist.
+ */
+export function parseContactsFromHtmlString(htmlString: string): StoreContacts {
+  // Parse HTML once to avoid extra synchronous work during popup boot.
+  const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+  const regexEmails = new Set(extractEmailsFromHtmlString(htmlString))
+  for (const email of extractEmailsFromDocument(doc)) regexEmails.add(email)
+  return {
+    emails: [...regexEmails],
+    social: parseSocialFromDocument(doc),
+  }
+}
+
+export function parseThemeFromHtmlString(htmlString: string): {
+  rawTheme: Record<string, unknown> | null
+  theme: Partial<ShopifyTheme>
+} {
+  const rawTheme = getShopifyThemeFromHtml(htmlString)
   const theme: Partial<ShopifyTheme> =
     rawTheme == null
       ? {}
@@ -554,14 +646,16 @@ export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllR
           author: 'Shopify',
           isOS2: Boolean(rawTheme['schema_name']),
         }
-  console.log('[SpyKit Popup] theme+apps: parsed theme', {
-    rawTheme,
-    normalizedTheme: theme,
-  })
+  return { rawTheme, theme }
+}
 
-  const appsResult = await detectAppsFromHtmlString(htmlRes.html)
-  const rawDetectedApps = Array.isArray((appsResult as { detected_apps?: unknown }).detected_apps)
-    ? ((appsResult as { detected_apps: Array<Record<string, unknown>> }).detected_apps)
+export async function parseAppsFromHtmlString(htmlString: string): Promise<{
+  appDetectionResult: Record<string, unknown>
+  apps: ShopifyApp[]
+}> {
+  const appDetectionResult = await detectAppsFromHtmlString(htmlString)
+  const rawDetectedApps = Array.isArray((appDetectionResult as { detected_apps?: unknown }).detected_apps)
+    ? ((appDetectionResult as { detected_apps: Array<Record<string, unknown>> }).detected_apps)
     : []
   const apps: ShopifyApp[] = rawDetectedApps.map((a) => {
     const catRaw = String(a['category'] ?? '').toLowerCase()
@@ -587,24 +681,74 @@ export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllR
         : [],
     }
   })
-  console.log('[SpyKit Popup] theme+apps: parsed apps', {
-    sourceAppsUrl: (appsResult as { source_apps_url?: unknown }).source_apps_url ?? null,
-    totalDetected: apps.length,
-    apps,
-    fullResult: appsResult,
+  return { appDetectionResult, apps }
+}
+
+/**
+ * Official entry point for theme + apps detection.
+ * Fetches the active tab's full HTML, then runs DOMParser-based extraction
+ * for both `Shopify.theme` and the app catalog — all in the popup process.
+ * Persists the result to the background cache so it is visible on all tabs.
+ */
+export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllResponse> {
+  emitSpykitToast('Fetching theme & apps...')
+  const htmlRes = await spykitDebugFetchHtmlFromActiveTab()
+  if (!htmlRes.ok) return { ok: false, error: htmlRes.error }
+  console.log('[SpyKit Popup] theme+apps: html fetched', {
+    url: htmlRes.url,
+    htmlLength: htmlRes.html.length,
   })
 
-  const emails = extractEmailsFromHtmlString(htmlRes.html)
-  console.log('[SpyKit Popup] theme+apps: parsed emails', {
-    totalEmails: emails.length,
-    emails,
+  let domain: string
+  try {
+    domain = normalizeStoreDomainKey(new URL(htmlRes.url).hostname)
+  } catch {
+    domain = normalizeStoreDomainKey(htmlRes.url)
+  }
+
+  // Same as debug path: one HTML fetch, then dedicated parsers.
+  const { rawTheme, theme } = parseThemeFromHtmlString(htmlRes.html)
+  console.log('[SpyKit Popup] theme+apps: parsed theme', {
+    rawTheme,
+    normalizedTheme: theme,
+  })
+
+  const { appDetectionResult, apps } = await parseAppsFromHtmlString(htmlRes.html)
+  console.log('[SpyKit Popup] theme+apps: parsed apps', {
+    sourceAppsUrl: (appDetectionResult as { source_apps_url?: unknown }).source_apps_url ?? null,
+    totalDetected: apps.length,
+    apps,
+    fullResult: appDetectionResult,
+  })
+
+  const contacts = parseContactsFromHtmlString(htmlRes.html)
+  console.log('[SpyKit Popup] theme+apps: parsed contacts', {
+    emails: contacts.emails,
+    social: contacts.social,
   })
 
   try {
-    await persistSnapshotToBackground(domain, theme, rawTheme, apps, appsResult)
+    await persistSnapshotToBackground(domain, theme, rawTheme, apps, appDetectionResult)
   } catch (e) {
-    console.warn('[SpyKit Popup] spykitFetchThemeAndAppsFromHtml: persist failed', e)
+    console.warn('[SpyKit Popup] spykitFetchThemeAndAppsFromHtml: snapshot persist failed', e)
   }
+
+  // Persist contacts in background without blocking popup initial render.
+  chrome.runtime.sendMessage(
+    {
+      type: 'STORE_CONTACTS',
+      from: 'content',
+      payload: { domain, contacts },
+    } satisfies ExtMessage,
+    () => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          '[SpyKit Popup] spykitFetchThemeAndAppsFromHtml: contacts persist failed',
+          chrome.runtime.lastError.message,
+        )
+      }
+    },
+  )
 
   return {
     ok: true,
@@ -612,8 +756,9 @@ export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllR
     theme,
     shopifyThemeRaw: rawTheme,
     apps,
-    appDetectionResult: appsResult,
-    emails,
+    appDetectionResult,
+    emails: contacts.emails,
+    contacts,
     source: 'page_context',
   }
 }
@@ -659,13 +804,23 @@ export async function fetchAllData(
 
   // ── Step 2: collections ───────────────────────────────────────────────────
   onStep?.('fetching-collections')
-  emitSpykitToast('Fetching collections')
+  const expectedCollections = slim?.shopMeta?.published_collections_count
+  emitSpykitToast(
+    typeof expectedCollections === 'number'
+      ? `Fetching ${expectedCollections.toLocaleString()} collections`
+      : 'Fetching collections',
+  )
 
   const collections = await loadCollectionsFromIndexedDb(idbDomain)
 
   // ── Step 3: products ──────────────────────────────────────────────────────
   onStep?.('fetching-products')
-  emitSpykitToast('Fetching products')
+  const expectedProducts = slim?.shopMeta?.published_products_count
+  emitSpykitToast(
+    typeof expectedProducts === 'number'
+      ? `Fetching ${expectedProducts.toLocaleString()} products`
+      : 'Fetching products',
+  )
 
   const products = await loadProductsFromIndexedDb(idbDomain)
 
@@ -1081,6 +1236,7 @@ export type SpykitDebugAllResponse =
       apps: ShopifyApp[]
       appDetectionResult?: Record<string, unknown> | null
       emails?: string[]
+      contacts?: StoreContacts
       source: 'page_context' | 'main_world_fallback'
     }
   | { ok: false; error: string }

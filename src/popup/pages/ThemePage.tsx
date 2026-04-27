@@ -117,7 +117,7 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
   const versionPrefix = t ? `Version ${t.version || '—'}` : null
   const renamedValue = t?.themeRenamed && t.themeRenamed !== t.name ? t.themeRenamed : null
   const fallbackDescription = isCustomTheme
-    ? 'unindefitified theme, probably custom.'
+    ? "'unidentified theme, probably custom."
     : t
     ? [
         t.schemaName ? `Schema: ${t.schemaName}` : null,

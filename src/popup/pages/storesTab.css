@@ -194,6 +194,17 @@
   font-weight: 500;
 }
 
+.stores-tab .products-loading-icon {
+  margin-left: 2px;
+  color: var(--text-light);
+  animation: stores-tab-rotate 0.9s linear infinite;
+}
+
+@keyframes stores-tab-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .stores-tab .stat-box .stat-icon {
   width: 22px;
   height: 22px;
@@ -291,11 +302,12 @@
   flex-wrap: wrap;
 }
 
-/* flag-icons (npm `flag-icons`) — `.fi` + `.fis` square ratio */
-.stores-tab .stores-tab-flag.fi {
-  font-size: 0.95rem;
-  line-height: 1;
+/* Country flags (country-flag-icons) */
+.stores-tab .stores-tab-flag {
+  display: inline-block;
   width: 1.2em;
+  height: auto;
+  aspect-ratio: 1 / 1;
   flex-shrink: 0;
   border-radius: 2px;
   overflow: hidden;
@@ -348,20 +360,12 @@
   border-color: var(--border-dark);
 }
 
-.stores-tab .stores-tab-flag--ships.fi {
-  font-size: 1.35rem;
-  width: 1.55em;
-  line-height: 1;
-  display: inline-block;
-  vertical-align: middle;
-  box-shadow: none;
-}
-
-.stores-tab .stores-tab-ship-flag-img {
+.stores-tab .stores-tab-ship-flag-img,
+.stores-tab .stores-tab-flag--ships {
   display: block;
   width: 1.55em;
   height: auto;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
   border-radius: 2px;
   flex-shrink: 0;
@@ -518,6 +522,27 @@
 
 .stores-tab .estimated-age-block {
   margin-top: 4px;
+}
+
+.stores-tab .estimated-age-reveal-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stores-tab .estimated-age-reveal-btn {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1.2;
+}
+
+.stores-tab .estimated-age-reveal-btn:hover {
+  text-decoration: underline;
 }
 
 .stores-tab .age-first-published {

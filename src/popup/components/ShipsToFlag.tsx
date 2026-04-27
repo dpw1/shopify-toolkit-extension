@@ -7,9 +7,7 @@ type ShipsToFlagProps = {
   title?: string
 }
 
-/**
- * Ships-to row: render with a bundled SVG `<img>` when possible, else CSS `flag-icons` span.
- */
+/** Ships-to row: SVG image from bundled `country-flag-icons`. */
 export function ShipsToFlag({ country, className = '', title }: ShipsToFlagProps) {
   const code = countryToFlagCode(country)
   if (!code) {
@@ -19,8 +17,8 @@ export function ShipsToFlag({ country, className = '', title }: ShipsToFlagProps
       </span>
     )
   }
-  const src = getShipFlagAssetUrl(code)
   const t = title ?? countryCodeOnlyLabel(country)
+  const src = getShipFlagAssetUrl(code)
   if (src) {
     return (
       <img
@@ -28,17 +26,14 @@ export function ShipsToFlag({ country, className = '', title }: ShipsToFlagProps
         className={`stores-tab-ship-flag-img ${className}`.trim()}
         alt=""
         title={t}
-        loading="lazy"
-        decoding="async"
+        loading="eager"
+        decoding="sync"
       />
     )
   }
   return (
-    <span
-      className={['fi', `fi-${code}`, 'stores-tab-flag', 'stores-tab-flag--ships', className].filter(Boolean).join(' ')}
-      title={t}
-      role="img"
-      aria-hidden
-    />
+    <span className={`ships-flag-fallback ${className}`.trim()} title={t}>
+      {countryCodeOnlyLabel(country) || '?'}
+    </span>
   )
 }

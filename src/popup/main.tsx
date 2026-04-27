@@ -1,5 +1,4 @@
 import { createRoot } from 'react-dom/client'
-import 'flag-icons/css/flag-icons.min.css'
 import './styles/globals.css'
 import App from './App'
 

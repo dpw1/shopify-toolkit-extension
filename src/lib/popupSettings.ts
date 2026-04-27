@@ -3,7 +3,7 @@
  * Legacy keys (`activeTab`, `popupViewState`, `scrollY`) are read once for migration.
  */
 
-import type { PopupPageId, PopupSettings, PopupViewState } from '../types'
+import type { PopupPageId, PopupSettings, PopupStoreScopedState, PopupViewState } from '../types'
 import { storageSet } from './storage'
 
 export const POPUP_SETTINGS_VERSION = 1
@@ -35,6 +35,26 @@ export const DEFAULT_POPUP_SETTINGS: PopupSettings = {
   scraperTypeFilters: [],
   scraperCatalogFilters: [],
   scraperPerPage: 10,
+  storeUiByDomain: {},
+}
+
+function normalizeStoreScopedState(raw: unknown): PopupStoreScopedState | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = normalizePartial(raw)
+  return {
+    activeTab: p.activeTab ?? DEFAULT_POPUP_SETTINGS.activeTab,
+    scrollY: p.scrollY ?? DEFAULT_POPUP_SETTINGS.scrollY,
+    appsExpandedAppKey: p.appsExpandedAppKey ?? DEFAULT_POPUP_SETTINGS.appsExpandedAppKey,
+    appsScrollY: p.appsScrollY ?? DEFAULT_POPUP_SETTINGS.appsScrollY,
+    scraperView: p.scraperView ?? DEFAULT_POPUP_SETTINGS.scraperView,
+    scraperPage: p.scraperPage ?? DEFAULT_POPUP_SETTINGS.scraperPage,
+    scraperSearch: p.scraperSearch ?? DEFAULT_POPUP_SETTINGS.scraperSearch,
+    scraperStockFilter: p.scraperStockFilter ?? DEFAULT_POPUP_SETTINGS.scraperStockFilter,
+    scraperVendorFilters: p.scraperVendorFilters ?? DEFAULT_POPUP_SETTINGS.scraperVendorFilters,
+    scraperTypeFilters: p.scraperTypeFilters ?? DEFAULT_POPUP_SETTINGS.scraperTypeFilters,
+    scraperCatalogFilters: p.scraperCatalogFilters ?? DEFAULT_POPUP_SETTINGS.scraperCatalogFilters,
+    scraperPerPage: p.scraperPerPage ?? DEFAULT_POPUP_SETTINGS.scraperPerPage,
+  }
 }
 
 function normalizePartial(raw: unknown): Partial<PopupSettings> {
@@ -68,6 +88,17 @@ function normalizePartial(raw: unknown): Partial<PopupSettings> {
   }
   if (o.scraperPerPage === 10 || o.scraperPerPage === 25 || o.scraperPerPage === 50) {
     out.scraperPerPage = o.scraperPerPage
+  }
+  if (o.storeUiByDomain && typeof o.storeUiByDomain === 'object') {
+    const mapIn = o.storeUiByDomain as Record<string, unknown>
+    const mapOut: Record<string, PopupStoreScopedState> = {}
+    for (const [domain, rawScoped] of Object.entries(mapIn)) {
+      const key = domain.trim().toLowerCase()
+      if (!key) continue
+      const scoped = normalizeStoreScopedState(rawScoped)
+      if (scoped) mapOut[key] = scoped
+    }
+    out.storeUiByDomain = mapOut
   }
   return out
 }

@@ -270,6 +270,21 @@ export interface StoreCacheMeta {
 
 export type PopupPageId = 'store' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
 
+export interface PopupStoreScopedState {
+  activeTab: PopupPageId
+  scrollY: number
+  appsExpandedAppKey: string
+  appsScrollY: number
+  scraperView: 'products' | 'collections'
+  scraperPage: number
+  scraperSearch: string
+  scraperStockFilter: 'all' | 'in' | 'out'
+  scraperVendorFilters: string[]
+  scraperTypeFilters: string[]
+  scraperCatalogFilters: string[]
+  scraperPerPage: 10 | 25 | 50
+}
+
 /**
  * Single persisted blob for all popup UI preferences.
  * Bump `settingsVersion` when adding fields so migrations can normalize old storage.
@@ -291,6 +306,8 @@ export interface PopupSettings {
   scraperTypeFilters: string[]
   scraperCatalogFilters: string[]
   scraperPerPage: 10 | 25 | 50
+  /** Per-store UI memory keyed by normalized storefront domain. */
+  storeUiByDomain?: Record<string, PopupStoreScopedState>
 }
 
 /** @deprecated Legacy shape — read only for migration into `popupSettings`. */

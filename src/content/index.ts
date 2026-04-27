@@ -311,6 +311,7 @@ function collectStoreContacts(): StoreContacts {
     linkedin:  { pattern: /linkedin\.com\/(company|in)\//, blacklist: ['/sharing/', '/share'] },
     snapchat:  { pattern: /snapchat\.com\/add\//, blacklist: [] },
     vimeo:     { pattern: /vimeo\.com\/(channels\/|groups\/|[a-zA-Z][a-zA-Z0-9]+)/, blacklist: ['/video/', '/ondemand/', '/showcase/'] },
+    discord:   { pattern: /discord\.(gg|com\/invite)\//, blacklist: [] },
   }
 
   const emailBlacklist = [
