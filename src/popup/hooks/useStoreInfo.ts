@@ -4,7 +4,9 @@ import {
   checkActiveTabHasShopifyTheme,
   fetchAllData,
   loadPopupStoreBundle,
+  loadStoreMetadataFromExtension,
   requestContentShopScanFromPopup,
+  resolveActiveTabShopDomain,
   type PopupStoreBundle,
 } from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
@@ -78,9 +80,27 @@ export function useStoreInfo(): void {
       eligibleRef.current = true
       setStorefrontEligibility('eligible')
 
-      // Content scan first so PAGE_DATA (theme) lands before we read cache.
-      const scanRes = await requestContentShopScanFromPopup()
-      console.log('[SpyKit Popup] useStoreInfo: SPYKIT_RUN_SHOP_SCAN done', scanRes)
+      // Check if we already have a cached theme for this store. If so, skip
+      // the expensive content scan (meta.json + app detection + contacts) —
+      // the user can always force a re-scan via the Re-sync button.
+      const hint = await resolveActiveTabShopDomain()
+      let hasCachedTheme = false
+      if (hint) {
+        const cached = await loadStoreMetadataFromExtension(hint)
+        hasCachedTheme =
+          cached?.theme != null ||
+          (cached?.shopifyThemeRaw != null &&
+            typeof cached.shopifyThemeRaw === 'object' &&
+            !Array.isArray(cached.shopifyThemeRaw) &&
+            Object.keys(cached.shopifyThemeRaw as object).length > 0)
+      }
+
+      if (!hasCachedTheme) {
+        const scanRes = await requestContentShopScanFromPopup()
+        console.log('[SpyKit Popup] useStoreInfo: SPYKIT_RUN_SHOP_SCAN done', scanRes)
+      } else {
+        console.log('[SpyKit Popup] useStoreInfo: cache hit — skipping content scan')
+      }
 
       const bundle = await fetchAllData((step) => {
         if (!cancelled) setFetchStep(step)

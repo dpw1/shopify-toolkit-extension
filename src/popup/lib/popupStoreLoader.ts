@@ -172,6 +172,31 @@ export function requestFullStoreRefreshFromPopup(): Promise<{ ok?: boolean; erro
   })
 }
 
+/** Debug-only: run collection products linking (`/collections/{handle}/products.json`) on demand. */
+export function requestCollectionProductsLinkingFromPopup(): Promise<{ ok?: boolean; error?: string }> {
+  console.log('[SpyKit Popup] requestCollectionProductsLinkingFromPopup → SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS')
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS', from: 'popup' } satisfies ExtMessage,
+        (r: unknown) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[SpyKit Popup] SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS lastError', chrome.runtime.lastError.message)
+            resolve({ ok: false, error: chrome.runtime.lastError.message })
+            return
+          }
+          const out = (r as { ok?: boolean; error?: string }) ?? { ok: false }
+          console.log('[SpyKit Popup] SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS response', out)
+          resolve(out)
+        },
+      )
+    } catch (e) {
+      console.warn('[SpyKit Popup] SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS throw', e)
+      resolve({ ok: false, error: String(e) })
+    }
+  })
+}
+
 // ─── Step 1: domain ───────────────────────────────────────────────────────────
 
 /**
@@ -901,5 +926,92 @@ export async function spykitDebugFetchAppsFromActiveTab(): Promise<SpykitDebugAp
     return { ok: false, error: err }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export type SpykitDebugFetchHtmlResponse =
+  | { ok: true; html: string; url: string }
+  | { ok: false; error: string }
+
+async function fetchHtmlViaExecuteScript(tabId: number, fallbackUrl: string): Promise<SpykitDebugFetchHtmlResponse> {
+  console.log('[SpyKit Popup] debug-fetch-html: executeScript fallback start', { tabId })
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: () => {
+        const html = document.querySelector('html')?.innerHTML ?? ''
+        return { html, url: location.href }
+      },
+    })
+    const first = results[0]?.result as { html?: unknown; url?: unknown } | undefined
+    console.log('[SpyKit Popup] debug-fetch-html: executeScript fallback success', {
+      url: typeof first?.url === 'string' ? first.url : fallbackUrl,
+      htmlLength: typeof first?.html === 'string' ? first.html.length : 0,
+    })
+    return {
+      ok: true,
+      html: typeof first?.html === 'string' ? first.html : '',
+      url: typeof first?.url === 'string' ? first.url : fallbackUrl,
+    }
+  } catch (e) {
+    console.warn('[SpyKit Popup] debug-fetch-html: executeScript fallback failed', e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Debug-only helper: fetches full document HTML from the content script and
+ * returns it so the popup can log it.
+ */
+export async function spykitDebugFetchHtmlFromActiveTab(): Promise<SpykitDebugFetchHtmlResponse> {
+  console.log('[SpyKit Popup] debug-fetch-html: start')
+  const primary = await getLastFocusedHttpTab()
+  console.log('[SpyKit Popup] debug-fetch-html: primary tab', {
+    id: primary?.id ?? null,
+    url: primary?.url ?? null,
+  })
+  if (!primary?.id || !primary.url) return { ok: false, error: 'no_active_tab' }
+  try {
+    const u = new URL(primary.url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { ok: false, error: 'unsupported_tab_url' }
+    }
+  } catch {
+    return { ok: false, error: 'bad_tab_url' }
+  }
+
+  // For plain HTML capture, do not block on the long content-script ping sweep.
+  // Use the resolved storefront tab directly; if message channel fails, fallback to executeScript.
+  const tabId = primary.id
+  console.log('[SpyKit Popup] debug-fetch-html: using tabId', tabId)
+  try {
+    console.log('[SpyKit Popup] debug-fetch-html: sending SPYKIT_DEBUG_FETCH_HTML')
+    const r: unknown = await chrome.tabs.sendMessage(tabId, {
+      type: 'SPYKIT_DEBUG_FETCH_HTML',
+      from: 'popup',
+    } satisfies ExtMessage)
+    console.log('[SpyKit Popup] debug-fetch-html: raw response', r)
+    if (r && typeof r === 'object' && 'ok' in r && (r as { ok?: boolean }).ok === true) {
+      const out = r as { ok: true; html?: unknown; url?: unknown }
+      return {
+        ok: true,
+        html: typeof out.html === 'string' ? out.html : '',
+        url: typeof out.url === 'string' ? out.url : primary.url,
+      }
+    }
+    const err =
+      r && typeof r === 'object' && 'error' in r ? String((r as { error?: unknown }).error) : 'unknown'
+    console.warn('[SpyKit Popup] debug-fetch-html: message returned error', err)
+    if (err.toLowerCase().includes('node cannot be found in the current page')) {
+      console.warn('[SpyKit Popup] debug-fetch-html: falling back to executeScript (node missing)')
+      return await fetchHtmlViaExecuteScript(tabId, primary.url)
+    }
+    return { ok: false, error: err }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.warn('[SpyKit Popup] debug-fetch-html: sendMessage threw', msg)
+    console.warn('[SpyKit Popup] debug-fetch-html: falling back to executeScript (throw path)')
+    return await fetchHtmlViaExecuteScript(tabId, primary.url)
   }
 }

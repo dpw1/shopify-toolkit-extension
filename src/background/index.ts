@@ -412,7 +412,7 @@ async function fetchCatalogProductsPages(origin: string): Promise<CatalogProduct
 }
 
 async function fetchCatalogCollectionsPages(origin: string): Promise<CatalogCollectionRow[]> {
-  toastPopup('Fetching collections.json…')
+  toastPopup('Fetching collections…')
   const collections: CatalogCollectionRow[] = []
   let cPage = 1
   while (true) {
@@ -474,7 +474,7 @@ async function buildProductCollectionHandlesMap(
   return productCollectionsMap
 }
 
-async function syncCatalogFromActiveTab(): Promise<void> {
+async function syncCatalogFromActiveTab(includeCollectionProducts = false): Promise<void> {
   const tab = await getNormalWindowActiveTab()
   if (!tab?.url) {
     log('SYNC_CATALOG: no active tab url')
@@ -521,6 +521,29 @@ async function syncCatalogFromActiveTab(): Promise<void> {
 
       map = await loadCacheMap()
       existing = map[key] ?? null
+      if (!includeCollectionProducts) {
+        await saveCacheMeta(
+          domain,
+          {
+            productCount: products.length,
+            collectionCount: collections.length,
+            catalogLoading: false,
+            catalogLinkingCollections: false,
+            catalogFullDataInIndexedDb: true,
+            catalogSourceFetchedAt: partialFetchedAt,
+            cachedAt: partialFetchedAt,
+          },
+          existing,
+        )
+        log('syncCatalog done (without collection-product linking)', {
+          domain,
+          productCount: products.length,
+          collectionCount: collections.length,
+        })
+        toastPopup('Catalog sync complete')
+        return
+      }
+
       await saveCacheMeta(
         domain,
         {
@@ -687,6 +710,7 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
       await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, undefined)
       log('Stored theme (MAIN inject) for', normalizeStoreDomainKey(domain))
     })()
+    sendResponse({ ok: true })
     return false
   }
 
@@ -699,6 +723,7 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
         apps: apps.length,
       })
     })()
+    sendResponse({ ok: true })
     return false
   }
 
@@ -778,7 +803,19 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
   }
 
   if (msg.type === 'SYNC_CATALOG_ON_POPUP') {
-    void syncCatalogFromActiveTab().catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
+    void syncCatalogFromActiveTab(false).catch((err) => console.error('[SpyKit BG] SYNC_CATALOG', err))
+  }
+
+  if (msg.type === 'SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS' && msg.from === 'popup') {
+    void (async () => {
+      try {
+        await syncCatalogFromActiveTab(true)
+        sendResponse({ ok: true })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
+    })()
+    return true
   }
 
   if (msg.type === 'SPYKIT_RUN_SHOP_SCAN' && msg.from === 'popup') {

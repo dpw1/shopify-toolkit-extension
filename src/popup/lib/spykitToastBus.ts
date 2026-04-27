@@ -1,6 +1,10 @@
 /** Popup-local toast bus (non-React modules can emit without a React context). */
 
-type ToastHandler = (message: string) => void
+export type ToastType = 'info' | 'success'
+
+export type ToastPayload = { message: string; type: ToastType }
+
+type ToastHandler = (payload: ToastPayload) => void
 
 const handlers = new Set<ToastHandler>()
 
@@ -9,6 +13,14 @@ export function subscribeSpykitToast(handler: ToastHandler): () => void {
   return () => handlers.delete(handler)
 }
 
+function emit(payload: ToastPayload): void {
+  for (const h of handlers) h(payload)
+}
+
 export function emitSpykitToast(message: string): void {
-  for (const h of handlers) h(message)
+  emit({ message, type: 'info' })
+}
+
+export function emitSpykitSuccess(message: string): void {
+  emit({ message, type: 'success' })
 }

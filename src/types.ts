@@ -382,6 +382,12 @@ export interface MsgSyncCatalogOnPopup {
   from: 'popup'
 }
 
+/** Popup debug action: run per-collection products linking on demand. */
+export interface MsgSpykitDebugLinkCollectionProducts {
+  type: 'SPYKIT_DEBUG_LINK_COLLECTION_PRODUCTS'
+  from: 'popup'
+}
+
 /** Clear this tab’s canonical store from IDB + `storeCacheByDomain`, then re-fetch everything. */
 export interface MsgForceRefreshStore {
   type: 'FORCE_REFRESH_STORE'
@@ -444,6 +450,12 @@ export interface MsgSpykitDebugFetchTheme {
 /** Popup → content: run catalog + DOM app detector, merge into next `PAGE_DATA` (stores tab debug). */
 export interface MsgSpykitDebugFetchApps {
   type: 'SPYKIT_DEBUG_FETCH_APPS'
+  from: 'popup'
+}
+
+/** Popup → content: fetch full document HTML (`document.querySelector('html').innerHTML`). */
+export interface MsgSpykitDebugFetchHtml {
+  type: 'SPYKIT_DEBUG_FETCH_HTML'
   from: 'popup'
 }
 
@@ -533,6 +545,7 @@ export type ExtMessage =
   | MsgAppsDetected
   | MsgGetStoreInfo
   | MsgSyncCatalogOnPopup
+  | MsgSpykitDebugLinkCollectionProducts
   | MsgForceRefreshStore
   | MsgSpykitRunShopScan
   | MsgSpykitDebugHeadHtml
@@ -540,6 +553,7 @@ export type ExtMessage =
   | MsgSpykitFetchPageContext
   | MsgSpykitDebugFetchTheme
   | MsgSpykitDebugFetchApps
+  | MsgSpykitDebugFetchHtml
   | MsgSpykitStoreSnapshotFromPopup
   | MsgSpykitThemeFromMainWorld
   | MsgGetIdbCatalog

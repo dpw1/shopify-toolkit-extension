@@ -20,8 +20,9 @@ import {
   RefreshCw,
   Store,
   Video,
+  X,
 } from 'lucide-react'
-import { emitSpykitToast } from '../lib/spykitToastBus'
+import { emitSpykitSuccess, emitSpykitToast } from '../lib/spykitToastBus'
 import './storesTab.css'
 import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
 import {
@@ -37,8 +38,10 @@ import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/h
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 import {
   loadPopupStoreBundle,
+  requestCollectionProductsLinkingFromPopup,
   requestFullStoreRefreshFromPopup,
   spykitDebugFetchAllFromActiveTab,
+  spykitDebugFetchHtmlFromActiveTab,
 } from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
 import { useSpykitStore } from '../store/useSpykitStore'
@@ -190,6 +193,156 @@ function formatRelative(t: number): string {
   return `${Math.floor(h / 24)} day(s) ago`
 }
 
+function getShopifyTheme(htmlString: string): Record<string, unknown> | null {
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(htmlString, 'text/html')
+
+    const script = Array.from(doc.querySelectorAll('head script:not([src]):not([class])')).find((s) =>
+      (s.textContent ?? '').includes('Shopify.theme'),
+    )
+    if (!script) return null
+
+    const match = (script.textContent ?? '').match(/Shopify\.theme\s*=\s*(\{[^;]+\})/)
+    if (!match?.[1]) return null
+
+    return JSON.parse(match[1]) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+async function detectAppsFromHtmlString(
+  htmlString: string,
+): Promise<Record<string, unknown>> {
+  const APPS_JSON_URL = 'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json?v=126819430410946608741777188403'
+
+  const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+  if (doc.querySelector('parsererror')) throw new Error('Invalid HTML string provided.')
+
+  const fetchJSON = async (url: string) => {
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) throw new Error(`Failed to fetch catalog: ${res.status} ${res.statusText}`)
+    const data = await res.json()
+    if (!Array.isArray(data)) throw new Error('Invalid catalog format')
+    return data as Array<Record<string, any>>
+  }
+
+  const getAppName = (app: Record<string, any>) =>
+    app.appTitle || app.name || (app.id != null ? `App #${app.id}` : 'Unknown App')
+
+  const getAppCategory = (app: Record<string, any>) => {
+    if (app.category?.trim()) return app.category
+    try {
+      const cats = JSON.parse(app.categoriesJson || '[]')
+      if (Array.isArray(cats) && cats[0]?.trim()) return cats[0]
+    } catch {
+      /* ignore */
+    }
+    return 'Uncategorized'
+  }
+
+  const getAppKey = (app: Record<string, any>) => app.id?.toString() || getAppName(app)
+  const matchesPattern = (text: unknown, patterns: unknown) =>
+    Array.isArray(patterns) &&
+    patterns.some((p) => String(text ?? '').toLowerCase().includes(String(p).toLowerCase()))
+
+  const scripts = [...doc.querySelectorAll('script')]
+  const links = [...doc.querySelectorAll('link[href]')]
+
+  const detectByDOM = (app: Record<string, any>) =>
+    (app.domSelectors || [])
+      .map((sel: string) => {
+        try {
+          return doc.querySelectorAll(sel).length
+        } catch {
+          return 0
+        }
+      })
+      .filter((count: number) => count > 0)
+      .map((count: number, i: number) => `(DOM: ${count} x ${app.domSelectors[i]})`)
+
+  const detected = new Map<string, Record<string, any>>()
+  const addDetection = (app: Record<string, any>, sources: string[]) => {
+    const key = getAppKey(app)
+    if (!detected.has(key)) {
+      detected.set(key, {
+        ...app,
+        name: getAppName(app),
+        category: getAppCategory(app),
+        sourceAppUrl: app.sourceAppUrl || null,
+        appIconUrl: app.appIconUrl || null,
+        scripts: [],
+      })
+    }
+    const entry = detected.get(key)!
+    sources.forEach((src) => {
+      if (src && !entry.scripts.includes(src)) entry.scripts.push(src)
+    })
+  }
+
+  const catalog = await fetchJSON(APPS_JSON_URL)
+
+  for (const app of catalog) {
+    const srcs = [
+      ...new Set([
+        ...scripts
+          .map((s) => s.getAttribute('src') || '')
+          .filter((src) => matchesPattern(src, app.patterns)),
+        ...links
+          .map((l) => l.getAttribute('href') || '')
+          .filter((href) => matchesPattern(href, app.patterns)),
+      ]),
+    ]
+    const domHits = detectByDOM(app)
+    if (srcs.length || domHits.length) addDetection(app, [...srcs, ...domHits])
+  }
+
+  scripts.forEach((script) => {
+    const src = script.getAttribute('src') || ''
+    if (!src) return
+    const isShopify =
+      src.includes('shopify.com') &&
+      (src.includes('extensions') || src.includes('proxy') || src.includes('apps'))
+    const hasShop = src.includes('.js') && src.includes('?shop=')
+    if (isShopify || hasShop) {
+      const match = catalog.find((app) => matchesPattern(src, app.patterns))
+      if (match) addDetection(match, [src])
+    }
+  })
+
+  const sectionCount = doc.querySelectorAll("[id*='shopify-section'] > [class*='_ss_'][class*='section-template']").length
+  if (sectionCount) {
+    addDetection(
+      { id: 'sections-store-dom', appTitle: 'Sections Store', category: 'Page Builders' },
+      [`(DOM: ${sectionCount} section-template elements)`],
+    )
+  }
+
+  const allScriptSrcs = new Set(
+    [...detected.values()].flatMap((app) =>
+      app.scripts.filter((s: string) => s?.startsWith('http')),
+    ),
+  )
+  const headScripts = doc.head?.querySelectorAll('script') || []
+  const bodyScripts = doc.body?.querySelectorAll('script') || []
+
+  return {
+    url: null,
+    source_apps_url: APPS_JSON_URL,
+    catalog_total: catalog.length,
+    detected_apps: [...detected.values()],
+    apps: Object.fromEntries([...detected.entries()].map(([_, v]) => [v.name, v])),
+    total_detected: detected.size,
+    total_head_scripts: headScripts.length,
+    total_body_scripts: bodyScripts.length,
+    total_scripts: headScripts.length + bodyScripts.length,
+    total_stylesheets: doc.querySelectorAll("link[rel='stylesheet']").length,
+    section_store_count: sectionCount,
+    detected_script_srcs: [...allScriptSrcs],
+  }
+}
+
 export default function OverviewPage({
   storefrontEligibility,
   storeInfo,
@@ -202,6 +355,7 @@ export default function OverviewPage({
   const [copied, setCopied] = useState(false)
   const [reSyncBusy, setReSyncBusy] = useState(false)
   const [debugBusy, setDebugBusy] = useState(false)
+  const [shipsToModalOpen, setShipsToModalOpen] = useState(false)
   /** Latest time data was pulled from storefront HTTP (meta.json / catalog), not popup read time. */
   const sourceDataUpdatedAt = Math.max(
     storeInfo?.shopMetaSourceFetchedAt ?? 0,
@@ -269,6 +423,76 @@ export default function OverviewPage({
       })
       await new Promise((x) => setTimeout(x, 200))
       await pullSpykitBundleIntoZustand()
+    } finally {
+      setDebugBusy(false)
+    }
+  }
+
+  async function onDebugCollectionProducts() {
+    setDebugBusy(true)
+    try {
+      const r = await requestCollectionProductsLinkingFromPopup()
+      if (!r.ok) {
+        emitSpykitToast(`Debug collection products failed: ${r.error ?? 'unknown_error'}`)
+        console.warn('[SpyKit Popup] debug: collection products failed', r)
+        return
+      }
+      console.log('[SpyKit Popup] debug: collection products linking complete', r)
+      await new Promise((x) => setTimeout(x, 200))
+      await pullSpykitBundleIntoZustand()
+    } finally {
+      setDebugBusy(false)
+    }
+  }
+
+  async function onDebugFetchThemeFromHtml() {
+    console.log('[SpyKit Popup] debug: fetch html clicked')
+    setDebugBusy(true)
+    try {
+      const r = await spykitDebugFetchHtmlFromActiveTab()
+      console.log('[SpyKit Popup] debug: fetch html result', r)
+      if (!r.ok) {
+        emitSpykitToast(`Debug fetch html failed: ${r.error}`)
+        console.warn('[SpyKit Popup] debug: fetch html failed', r)
+        return
+      }
+      console.log('[SpyKit Popup] debug: fetched html', {
+        url: r.url,
+        htmlLength: r.html.length,
+      })
+      console.log(r.html)
+      const themeObj = getShopifyTheme(r.html)
+      console.log('[SpyKit Popup] debug: Shopify.theme parsed from fetched HTML', themeObj)
+      emitSpykitSuccess('fetched html')
+    } finally {
+      setDebugBusy(false)
+    }
+  }
+
+  async function onDebugFetchAppsFromHtml() {
+    console.log('[SpyKit Popup] debug: fetch apps from html clicked')
+    setDebugBusy(true)
+    try {
+      const r = await spykitDebugFetchHtmlFromActiveTab()
+      console.log('[SpyKit Popup] debug: fetch html result (apps path)', r)
+      if (!r.ok) {
+        emitSpykitToast(`Debug fetch apps failed: ${r.error}`)
+        console.warn('[SpyKit Popup] debug: fetch apps failed (html fetch)', r)
+        return
+      }
+      const themeObj = getShopifyTheme(r.html)
+      const appsResult = await detectAppsFromHtmlString(r.html)
+      const apps = Array.isArray((appsResult as { detected_apps?: unknown }).detected_apps)
+        ? ((appsResult as { detected_apps: Array<Record<string, unknown>> }).detected_apps)
+        : []
+      console.log('[SpyKit Popup] debug: Shopify.theme parsed from fetched HTML', themeObj)
+      console.log('[SpyKit Popup] debug: apps parsed from fetched HTML', {
+        sourceAppsUrl: (appsResult as { source_apps_url?: unknown }).source_apps_url ?? null,
+        totalDetected: apps.length,
+        apps,
+        fullResult: appsResult,
+      })
+      emitSpykitSuccess('fetched apps')
     } finally {
       setDebugBusy(false)
     }
@@ -369,11 +593,6 @@ export default function OverviewPage({
         <div className="not-connected">
           <Store size={40} />
           <p>This page is not a Shopify storefront.</p>
-          <p className="not-connected-detail">
-            SpyKit checks the tab you have open for <code>window.Shopify.theme</code>. That value only
-            exists on a live Shopify shop. Open your store (or any Shopify storefront) in this tab,
-            then open SpyKit again.
-          </p>
         </div>
       </div>
     )
@@ -563,23 +782,32 @@ export default function OverviewPage({
         <div className="intel-card col-3">
           <div className="intel-header">
             <div className="icon blue"><Globe size={13} /></div>
-            Ships To
+            {shipsTo.length > 0
+              ? `Ships to ${shipsTo.length} ${shipsTo.length === 1 ? 'country' : 'countries'}`
+              : 'Ships To'}
           </div>
           {shipsTo.length > 0 ? (
-            <div className="intel-sub ships-to-flags" style={{ marginTop: 4 }}>
-              {shipsTo.slice(0, 12).map((code, i) => (
-                <span
-                  key={`${i}-${code}`}
-                  className="ships-flag-chip"
-                  title={countryCodeOnlyLabel(code)}
+            <div style={{ marginTop: 4 }}>
+              <div className="ships-to-flags-grid">
+                {shipsTo.slice(0, 9).map((code, i) => (
+                  <span
+                    key={`${i}-${code}`}
+                    className="ships-flag-chip"
+                    title={countryCodeOnlyLabel(code)}
+                  >
+                    <ShipsToFlag country={code} className="stores-tab-flag--ships" />
+                  </span>
+                ))}
+              </div>
+              {shipsTo.length > 9 && (
+                <button
+                  type="button"
+                  className="ships-more-btn"
+                  onClick={() => setShipsToModalOpen(true)}
+                  title={`${shipsTo.length} countries total — click to see all`}
                 >
-                  <ShipsToFlag country={code} className="stores-tab-flag--ships" />
-                </span>
-              ))}
-              {shipsTo.length > 12 && (
-                <span className="ships-more" title={`${shipsTo.length} countries total`}>
-                  +{shipsTo.length - 12}
-                </span>
+                  +{shipsTo.length - 9} more
+                </button>
               )}
             </div>
           ) : (
@@ -701,8 +929,78 @@ export default function OverviewPage({
           >
             Apps
           </button>
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugCollectionProducts()}
+            title="Background: fetch per-collection products.json and attach product _collections"
+          >
+            Collection Products
+          </button>
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugFetchThemeFromHtml()}
+            title="Fetches HTML and parses Shopify.theme in popup"
+          >
+            Fetch Theme
+          </button>
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugFetchAppsFromHtml()}
+            title="Fetches HTML once, then parses Shopify.theme and app matches from it"
+          >
+            Fetch Apps
+          </button>
         </div>
       </div>
+
+      {/* Ships To — all-countries modal */}
+      {shipsToModalOpen && shipsTo.length > 0 && (
+        <div
+          className="apps-gallery-modal-backdrop"
+          onClick={() => setShipsToModalOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="apps-gallery-modal ships-to-all-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="All shipping countries"
+          >
+            <button
+              type="button"
+              className="apps-gallery-close"
+              onClick={() => setShipsToModalOpen(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <div className="ships-to-all-modal-inner">
+              <p className="ships-to-all-modal-title">
+                Ships to {shipsTo.length} {shipsTo.length === 1 ? 'country' : 'countries'}
+              </p>
+              <div className="ships-to-all-grid">
+                {shipsTo.map((code, i) => (
+                  <span
+                    key={`modal-${i}-${code}`}
+                    className="ships-flag-chip ships-flag-chip--modal"
+                    title={countryCodeOnlyLabel(code)}
+                  >
+                    <ShipsToFlag country={code} className="stores-tab-flag--ships" />
+                    <span className="ships-flag-chip-label">{countryCodeOnlyLabel(code)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

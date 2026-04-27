@@ -8,8 +8,8 @@ export default function Header({ onOpenSettings }: HeaderProps) {
   return (
     <header className="header">
       <div className="brand">
-        <img className="brand-logo" src="/icons/icon128.png" alt="Shopify SpyKit logo" />
-        <span className="brand-title">Shopify SpyKit</span>
+        <img className="brand-logo" src="/icons/icon128.png" alt="Shopify Spy Toolkit logo" />
+        <span className="brand-title">Shopify Spy Toolkit</span>
         <span className="badge-pro">
           <Star style={{ width: 12, height: 12 }} strokeWidth={2} aria-hidden />
           Pro

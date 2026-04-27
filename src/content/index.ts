@@ -663,6 +663,18 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     })()
     return true
   }
+  if (m?.type === 'SPYKIT_DEBUG_FETCH_HTML') {
+    try {
+      console.log('[SpyKit CS] SPYKIT_DEBUG_FETCH_HTML received', { url: location.href })
+      const html = document.querySelector('html')?.innerHTML ?? ''
+      console.log('[SpyKit CS] SPYKIT_DEBUG_FETCH_HTML responding', { htmlLength: html.length })
+      sendResponse({ ok: true, html, url: location.href } as const)
+    } catch (e) {
+      console.warn('[SpyKit CS] SPYKIT_DEBUG_FETCH_HTML failed', e)
+      sendResponse({ ok: false, error: String(e) } as const)
+    }
+    return false
+  }
   if (m?.type === 'SPYKIT_DEBUG_HEAD_HTML') {
     try {
       const html = document.querySelector('head')?.innerHTML ?? ''

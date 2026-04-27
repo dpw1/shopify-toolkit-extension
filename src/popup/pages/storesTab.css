@@ -306,11 +306,26 @@
   gap: 8px;
 }
 
-/* Ships to: rectangular flags only; country code + name in native tooltip */
-.stores-tab .ships-to-flags {
-  flex-wrap: wrap;
+/* Ships to: 3-column grid */
+.stores-tab .ships-to-flags-grid {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
   gap: 6px 8px;
 }
+
+.stores-tab .ships-more-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: 4px 0 0;
+  cursor: pointer;
+  line-height: 1;
+}
+.stores-tab .ships-more-btn:hover { text-decoration: underline; }
 
 .stores-tab .ships-flag-chip {
   display: inline-flex;
@@ -669,4 +684,54 @@
 .stores-tab .store-debug-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Ships-to: all-countries modal ─────────────────────────────────────────── */
+.ships-to-all-modal {
+  width: min(460px, calc(100vw - 40px));
+  height: auto;
+  max-height: min(540px, calc(100vh - 40px));
+  background: var(--bg-card);
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.ships-to-all-modal-inner {
+  width: 100%;
+  overflow-y: auto;
+  max-height: min(540px, calc(100vh - 40px));
+  padding: 48px 20px 20px;
+  box-sizing: border-box;
+}
+
+.ships-to-all-modal-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0 0 12px;
+}
+
+.ships-to-all-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.ships-flag-chip--modal {
+  cursor: default;
+  gap: 6px;
+  padding: 4px 6px;
+  min-width: unset;
+  justify-content: flex-start;
+}
+
+.ships-flag-chip-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 72px;
 }

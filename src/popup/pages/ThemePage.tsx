@@ -12,7 +12,6 @@ import {
   FileText,
   LifeBuoy,
   Monitor,
-  Pencil,
   ShoppingBag,
   Smartphone,
   Star,
@@ -59,25 +58,6 @@ function ThemeDollarIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-function ThemeSentimentStars({ rating }: { rating: number }) {
-  const clamped = Math.min(5, Math.max(0, rating))
-  return (
-    <div className="theme-sentiment-stars" role="img" aria-label={`${clamped.toFixed(1)} out of 5 stars`}>
-      {Array.from({ length: 5 }, (_, i) => {
-        const fill = Math.min(1, Math.max(0, clamped - i))
-        return (
-          <span key={i} className="theme-star-cell" aria-hidden>
-            <Star size={14} strokeWidth={2} className="theme-star-outline" />
-            <span className="theme-star-fill-wrap" style={{ width: `${fill * 100}%` }}>
-              <Star size={14} strokeWidth={2} fill="currentColor" />
-            </span>
-          </span>
-        )
-      })}
-      <span className="theme-star-num">{clamped.toFixed(1)}</span>
-    </div>
-  )
-}
 
 export default function ThemePage({ storeInfo }: ThemePageProps) {
   const t = getResolvedThemeForUI(storeInfo)
@@ -105,6 +85,9 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
   }, [storeInfo])
 
   const themeStoreUrl = themeListEntry?.themeURL ? appendUtmToUrl(themeListEntry.themeURL) : null
+  const reviewsUrl = themeListEntry?.themeURL
+    ? appendUtmToUrl(themeListEntry.themeURL.replace(/\/$/, '') + '/reviews')
+    : null
   const rawLiveDemoUrl =
     themeListEntry?.livedemo ??
     themeListEntry?.liveDemo ??
@@ -118,9 +101,8 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
   const heroImageUrl =
     themeListEntry?.desktopImage ?? themeListEntry?.mobileImage ?? themeListEntry?.img ?? null
   const themePriceLine = themeListEntry?.price ?? themeListEntry?.themePrice ?? null
-  const versionLine = t
-    ? `Version ${t.version || '—'}${t.themeRenamed && t.themeRenamed !== t.name ? ` \u2022 Renamed: ${t.themeRenamed}` : ''}`
-    : 'Open a Shopify storefront to load theme details.'
+  const versionPrefix = t ? `Version ${t.version || '—'}` : null
+  const renamedValue = t?.themeRenamed && t.themeRenamed !== t.name ? t.themeRenamed : null
 
   return (
     <>
@@ -139,15 +121,17 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
             </span>
           </div>
           <div className="theme-info-header">
-            <h2>
-              {displayName}
-              <Pencil size={16} color="var(--text-muted)" strokeWidth={2} style={{ cursor: 'pointer' }} aria-hidden />
-            </h2>
+            <h2>{displayName}</h2>
             <p className="flex-center" style={{ color: 'var(--text-main)', fontWeight: 500, marginBottom: 16 }}>
               <ShoppingBag size={16} color="var(--success)" strokeWidth={2} aria-hidden />
               by {creatorName}
             </p>
-            <p style={{ marginBottom: 16 }}>{versionLine}</p>
+            <p style={{ marginBottom: 16 }}>
+              {versionPrefix ?? 'Open a Shopify storefront to load theme details.'}
+              {renamedValue && (
+                <> &bull; Renamed: <strong>{renamedValue}</strong></>
+              )}
+            </p>
             <a
               href={themeStoreUrl ?? '#'}
               target="_blank"
@@ -169,9 +153,30 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
               <Users size={20} strokeWidth={2} aria-hidden />
             </div>
             <div>
-              <h4>{typeof reviewsCount === 'number' ? String(reviewsCount) : '—'}</h4>
-              {reviewStarRating != null ? <ThemeSentimentStars rating={reviewStarRating} /> : null}
-              <p>Reviews</p>
+              {reviewStarRating != null ? (
+                <div className="theme-single-star-row">
+                  <Star size={14} fill="#f59e0b" color="#f59e0b" aria-hidden />
+                  <span className="theme-single-star-rating">{reviewStarRating.toFixed(1)}</span>
+                  {typeof reviewsCount === 'number' ? (
+                    reviewsUrl ? (
+                      <a
+                        href={reviewsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="theme-single-star-count theme-reviews-link"
+                      >
+                        ({reviewsCount.toLocaleString()} reviews)
+                      </a>
+                    ) : (
+                      <span className="theme-single-star-count">
+                        ({reviewsCount.toLocaleString()} reviews)
+                      </span>
+                    )
+                  ) : null}
+                </div>
+              ) : (
+                <h4>—</h4>
+              )}
             </div>
           </div>
           <div className="side-card">

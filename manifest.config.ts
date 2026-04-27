@@ -9,7 +9,7 @@ import { defineManifest } from '@crxjs/vite-plugin'
  */
 export default defineManifest((env) => ({
   manifest_version: 3,
-  name: 'Shopify Spy ToolKit',
+  name: 'Shopify Spy Toolkit',
   version: '1.0.0',
   description: 'Spy on any Shopify store — detect theme, apps, products, and more.',
 
@@ -31,7 +31,7 @@ export default defineManifest((env) => ({
       '48': 'icons/icon48.png',
       '128': 'icons/icon128.png',
     },
-    default_title: 'Shopify Spy ToolKit',
+    default_title: 'Shopify Spy Toolkit',
   },
 
   background: {

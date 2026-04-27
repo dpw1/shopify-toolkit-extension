@@ -53,6 +53,10 @@ export function getShipsToCountriesRaw(shopMeta: unknown): unknown {
 
 /** Normalize Shopify `ships_to_countries` (and similar) to plain strings for flags. */
 export function normalizeShipsToCountries(raw: unknown): string[] {
+  const isValidToken = (v: string): boolean => v.trim().length > 1 && countryToFlagCode(v) != null
+  const dedupeAndFilter = (arr: string[]): string[] =>
+    Array.from(new Set(arr.map((v) => v.trim()).filter((v) => isValidToken(v))))
+
   if (raw == null) return []
   if (typeof raw === 'string') {
     const t = raw.trim()
@@ -64,10 +68,12 @@ export function normalizeShipsToCountries(raw: unknown): string[] {
         /* fall through */
       }
     }
-    return raw
+    return dedupeAndFilter(
+      raw
       .split(/[,;]/)
       .map((s) => s.trim())
-      .filter(Boolean)
+      .filter(Boolean),
+    )
   }
   if (!Array.isArray(raw)) {
     // Some stores expose map-like shapes, e.g. { US: "United States", CA: "Canada" }.
@@ -94,7 +100,7 @@ export function normalizeShipsToCountries(raw: unknown): string[] {
           }
         }
       }
-      return Array.from(new Set(outFromObject)).filter((v) => countryToFlagCode(v) != null)
+      return dedupeAndFilter(outFromObject)
     }
     return []
   }
@@ -145,7 +151,7 @@ export function normalizeShipsToCountries(raw: unknown): string[] {
       else if (candidates[0]) out.push(candidates[0])
     }
   }
-  return Array.from(new Set(out))
+  return dedupeAndFilter(out)
 }
 
 /** Resolve Shopify / free-text country to flag-icons class suffix (e.g. `us`). */

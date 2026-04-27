@@ -124,11 +124,13 @@ export default function App() {
     }
   }, [])
 
+  // Only force-reset to store when the tab is *confirmed* ineligible (not while still checking).
+  // Resetting during 'checking' would wipe the activeTab restored from chrome.storage.
   useEffect(() => {
-    if (!tabsEnabled && settings.activeTab !== 'store') {
+    if (storefrontEligibility === 'ineligible' && settings.activeTab !== 'store') {
       updateSettings({ activeTab: 'store' })
     }
-  }, [tabsEnabled, settings.activeTab, updateSettings])
+  }, [storefrontEligibility, settings.activeTab, updateSettings])
 
   return (
     <div className="app-container">
