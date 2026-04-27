@@ -35,13 +35,15 @@ import { ShipsToFlag } from '../components/ShipsToFlag'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
-import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 import {
+  getShopifyThemeFromHtml,
   loadPopupStoreBundle,
   requestCollectionProductsLinkingFromPopup,
   requestFullStoreRefreshFromPopup,
   spykitDebugFetchAllFromActiveTab,
   spykitDebugFetchHtmlFromActiveTab,
+  spykitDebugFetchMetaJsonFromActiveTab,
+  spykitFetchThemeAndAppsFromHtml,
 } from '../lib/popupStoreLoader'
 import { syncPopupStoreData } from '../windowStoreData'
 import { useSpykitStore } from '../store/useSpykitStore'
@@ -193,156 +195,6 @@ function formatRelative(t: number): string {
   return `${Math.floor(h / 24)} day(s) ago`
 }
 
-function getShopifyTheme(htmlString: string): Record<string, unknown> | null {
-  try {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(htmlString, 'text/html')
-
-    const script = Array.from(doc.querySelectorAll('head script:not([src]):not([class])')).find((s) =>
-      (s.textContent ?? '').includes('Shopify.theme'),
-    )
-    if (!script) return null
-
-    const match = (script.textContent ?? '').match(/Shopify\.theme\s*=\s*(\{[^;]+\})/)
-    if (!match?.[1]) return null
-
-    return JSON.parse(match[1]) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-async function detectAppsFromHtmlString(
-  htmlString: string,
-): Promise<Record<string, unknown>> {
-  const APPS_JSON_URL = 'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json?v=126819430410946608741777188403'
-
-  const doc = new DOMParser().parseFromString(htmlString, 'text/html')
-  if (doc.querySelector('parsererror')) throw new Error('Invalid HTML string provided.')
-
-  const fetchJSON = async (url: string) => {
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) throw new Error(`Failed to fetch catalog: ${res.status} ${res.statusText}`)
-    const data = await res.json()
-    if (!Array.isArray(data)) throw new Error('Invalid catalog format')
-    return data as Array<Record<string, any>>
-  }
-
-  const getAppName = (app: Record<string, any>) =>
-    app.appTitle || app.name || (app.id != null ? `App #${app.id}` : 'Unknown App')
-
-  const getAppCategory = (app: Record<string, any>) => {
-    if (app.category?.trim()) return app.category
-    try {
-      const cats = JSON.parse(app.categoriesJson || '[]')
-      if (Array.isArray(cats) && cats[0]?.trim()) return cats[0]
-    } catch {
-      /* ignore */
-    }
-    return 'Uncategorized'
-  }
-
-  const getAppKey = (app: Record<string, any>) => app.id?.toString() || getAppName(app)
-  const matchesPattern = (text: unknown, patterns: unknown) =>
-    Array.isArray(patterns) &&
-    patterns.some((p) => String(text ?? '').toLowerCase().includes(String(p).toLowerCase()))
-
-  const scripts = [...doc.querySelectorAll('script')]
-  const links = [...doc.querySelectorAll('link[href]')]
-
-  const detectByDOM = (app: Record<string, any>) =>
-    (app.domSelectors || [])
-      .map((sel: string) => {
-        try {
-          return doc.querySelectorAll(sel).length
-        } catch {
-          return 0
-        }
-      })
-      .filter((count: number) => count > 0)
-      .map((count: number, i: number) => `(DOM: ${count} x ${app.domSelectors[i]})`)
-
-  const detected = new Map<string, Record<string, any>>()
-  const addDetection = (app: Record<string, any>, sources: string[]) => {
-    const key = getAppKey(app)
-    if (!detected.has(key)) {
-      detected.set(key, {
-        ...app,
-        name: getAppName(app),
-        category: getAppCategory(app),
-        sourceAppUrl: app.sourceAppUrl || null,
-        appIconUrl: app.appIconUrl || null,
-        scripts: [],
-      })
-    }
-    const entry = detected.get(key)!
-    sources.forEach((src) => {
-      if (src && !entry.scripts.includes(src)) entry.scripts.push(src)
-    })
-  }
-
-  const catalog = await fetchJSON(APPS_JSON_URL)
-
-  for (const app of catalog) {
-    const srcs = [
-      ...new Set([
-        ...scripts
-          .map((s) => s.getAttribute('src') || '')
-          .filter((src) => matchesPattern(src, app.patterns)),
-        ...links
-          .map((l) => l.getAttribute('href') || '')
-          .filter((href) => matchesPattern(href, app.patterns)),
-      ]),
-    ]
-    const domHits = detectByDOM(app)
-    if (srcs.length || domHits.length) addDetection(app, [...srcs, ...domHits])
-  }
-
-  scripts.forEach((script) => {
-    const src = script.getAttribute('src') || ''
-    if (!src) return
-    const isShopify =
-      src.includes('shopify.com') &&
-      (src.includes('extensions') || src.includes('proxy') || src.includes('apps'))
-    const hasShop = src.includes('.js') && src.includes('?shop=')
-    if (isShopify || hasShop) {
-      const match = catalog.find((app) => matchesPattern(src, app.patterns))
-      if (match) addDetection(match, [src])
-    }
-  })
-
-  const sectionCount = doc.querySelectorAll("[id*='shopify-section'] > [class*='_ss_'][class*='section-template']").length
-  if (sectionCount) {
-    addDetection(
-      { id: 'sections-store-dom', appTitle: 'Sections Store', category: 'Page Builders' },
-      [`(DOM: ${sectionCount} section-template elements)`],
-    )
-  }
-
-  const allScriptSrcs = new Set(
-    [...detected.values()].flatMap((app) =>
-      app.scripts.filter((s: string) => s?.startsWith('http')),
-    ),
-  )
-  const headScripts = doc.head?.querySelectorAll('script') || []
-  const bodyScripts = doc.body?.querySelectorAll('script') || []
-
-  return {
-    url: null,
-    source_apps_url: APPS_JSON_URL,
-    catalog_total: catalog.length,
-    detected_apps: [...detected.values()],
-    apps: Object.fromEntries([...detected.entries()].map(([_, v]) => [v.name, v])),
-    total_detected: detected.size,
-    total_head_scripts: headScripts.length,
-    total_body_scripts: bodyScripts.length,
-    total_scripts: headScripts.length + bodyScripts.length,
-    total_stylesheets: doc.querySelectorAll("link[rel='stylesheet']").length,
-    section_store_count: sectionCount,
-    detected_script_srcs: [...allScriptSrcs],
-  }
-}
-
 export default function OverviewPage({
   storefrontEligibility,
   storeInfo,
@@ -461,7 +313,7 @@ export default function OverviewPage({
         htmlLength: r.html.length,
       })
       console.log(r.html)
-      const themeObj = getShopifyTheme(r.html)
+      const themeObj = getShopifyThemeFromHtml(r.html)
       console.log('[SpyKit Popup] debug: Shopify.theme parsed from fetched HTML', themeObj)
       emitSpykitSuccess('fetched html')
     } finally {
@@ -470,29 +322,57 @@ export default function OverviewPage({
   }
 
   async function onDebugFetchAppsFromHtml() {
-    console.log('[SpyKit Popup] debug: fetch apps from html clicked')
+    console.log('[SpyKit Popup] debug: fetch app/theme/email from html clicked')
     setDebugBusy(true)
     try {
-      const r = await spykitDebugFetchHtmlFromActiveTab()
-      console.log('[SpyKit Popup] debug: fetch html result (apps path)', r)
+      // Use the exact same official pipeline as popup load:
+      // one HTML fetch -> parse theme/apps -> map ShopifyApp[] -> persist snapshot.
+      const r = await spykitFetchThemeAndAppsFromHtml()
+      console.log('[SpyKit Popup] debug: fetch apps official pipeline result', r)
       if (!r.ok) {
-        emitSpykitToast(`Debug fetch apps failed: ${r.error}`)
-        console.warn('[SpyKit Popup] debug: fetch apps failed (html fetch)', r)
+        emitSpykitToast(`Debug fetch apps failed: ${r.error ?? 'unknown_error'}`)
+        console.warn('[SpyKit Popup] debug: fetch apps failed (official pipeline)', r)
         return
       }
-      const themeObj = getShopifyTheme(r.html)
-      const appsResult = await detectAppsFromHtmlString(r.html)
-      const apps = Array.isArray((appsResult as { detected_apps?: unknown }).detected_apps)
-        ? ((appsResult as { detected_apps: Array<Record<string, unknown>> }).detected_apps)
-        : []
-      console.log('[SpyKit Popup] debug: Shopify.theme parsed from fetched HTML', themeObj)
-      console.log('[SpyKit Popup] debug: apps parsed from fetched HTML', {
-        sourceAppsUrl: (appsResult as { source_apps_url?: unknown }).source_apps_url ?? null,
-        totalDetected: apps.length,
-        apps,
-        fullResult: appsResult,
+
+      await new Promise((x) => setTimeout(x, 150))
+      await pullSpykitBundleIntoZustand()
+
+      const zustandAppsObj = (
+        useSpykitStore.getState().storeInfo?.appDetectionResult as
+          | { apps?: Record<string, unknown> }
+          | undefined
+      )?.apps
+      const zustandApps = Object.values(zustandAppsObj ?? {})
+      console.log('[SpyKit Popup] debug: apps persisted to Zustand', {
+        domain: r.domain,
+        fetchedApps: r.apps,
+        fetchedEmails: r.emails ?? [],
+        zustandApps,
+        fetchedCount: r.apps.length,
+        fetchedEmailCount: (r.emails ?? []).length,
+        zustandCount: zustandApps.length,
       })
-      emitSpykitSuccess('fetched apps')
+      emitSpykitSuccess('fetched app/theme/email')
+    } finally {
+      setDebugBusy(false)
+    }
+  }
+
+  async function onDebugFetchMetaJson() {
+    setDebugBusy(true)
+    try {
+      const r = await spykitDebugFetchMetaJsonFromActiveTab()
+      if (!r.ok) {
+        emitSpykitToast(`Debug meta.json failed: ${r.error}`)
+        console.warn('[SpyKit Popup] debug: meta.json failed', r)
+        return
+      }
+      console.log('[SpyKit Popup] debug: meta.json fetched', {
+        url: r.url,
+        meta: r.meta,
+      })
+      emitSpykitSuccess('fetched meta.json')
     } finally {
       setDebugBusy(false)
     }
@@ -534,8 +414,11 @@ export default function OverviewPage({
       ? idbC
       : (storeInfo?.collectionCount ?? 0)
 
-  const themeName       = getResolvedThemeForUI(storeInfo)?.name ?? '—'
-  const appsCount       = storeInfo?.apps?.length ?? 0
+  const appsCount =
+    Object.keys(
+      ((storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)?.apps ??
+        {}) as Record<string, unknown>,
+    ).length
 
   const locationCity = [shopMeta?.city, shopMeta?.province].filter(Boolean).join(', ') || null
   const locationCountry = shopMeta?.country || null
@@ -558,7 +441,8 @@ export default function OverviewPage({
 
   const description = shopMeta?.description?.trim() || null
 
-  const email         = contacts?.emails?.[0] || null
+  const emails = contacts?.emails ?? []
+  const email = emails[0] ?? null
   const socialEntries = Object.entries(contacts?.social ?? {})
 
   /** Earliest `published_at` from IDB catalog (full product list). */
@@ -577,8 +461,8 @@ export default function OverviewPage({
   }, [catalogProducts])
 
   function copyEmail() {
-    if (!email) return
-    void navigator.clipboard.writeText(email).catch(() => {})
+    if (!emails.length) return
+    void navigator.clipboard.writeText(emails.join(', ')).catch(() => {})
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -635,12 +519,12 @@ export default function OverviewPage({
                     <ArrowUpRight size={13} />
                   </a>
                 )}
-                {email && (
+                {emails.length > 0 && (
                   <span className="store-email">
-                    {email}
+                    {emails.join(', ')}
                     <button
                       className={`copy-btn${copied ? ' copied' : ''}`}
-                      title={copied ? 'Copied!' : 'Copy email'}
+                      title={copied ? 'Copied!' : 'Copy emails'}
                       onClick={copyEmail}
                     >
                       {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -673,7 +557,7 @@ export default function OverviewPage({
         {/* ── Stat boxes ─────────────────────────────────────────────────── */}
         <div className="store-stats-row">
           <div
-            className="stat-box"
+            className="stat-box stat-box--theme"
             role="button"
             tabIndex={0}
             onClick={() => onNavigate('theme')}
@@ -683,13 +567,13 @@ export default function OverviewPage({
               Theme
             </div>
             <div className="stat-value">
-              {reSyncBusy ? <span className="stat-value-skeleton" aria-hidden /> : themeName}
+            { storeInfo?.theme?.name ?? '—'}
             </div>
             <div className="stat-link">Details &rsaquo;</div>
           </div>
 
           <div
-            className="stat-box"
+            className="stat-box stat-box--apps"
             role="button"
             tabIndex={0}
             onClick={() => onNavigate('apps')}
@@ -705,7 +589,7 @@ export default function OverviewPage({
           </div>
 
           <div
-            className="stat-box"
+            className="stat-box stat-box--products"
             role="button"
             tabIndex={0}
             onClick={() => onNavigate('scraper', { scraperView: 'products' })}
@@ -725,7 +609,7 @@ export default function OverviewPage({
           </div>
 
           <div
-            className="stat-box"
+            className="stat-box stat-box--collections"
             role="button"
             tabIndex={0}
             onClick={() => onNavigate('scraper', { scraperView: 'collections' })}
@@ -752,34 +636,34 @@ export default function OverviewPage({
       <div className="intelligence-grid">
 
         {/* Location */}
-        <div className="intel-card col-3">
+        <div className="intel-card intel-card--location col-3">
           <div className="intel-header">
             <div className="icon purple"><MapPin size={13} /></div>
             Location
           </div>
-          {locationCity && <div className="intel-value">{locationCity}</div>}
+          {locationCity && <div className="intel-value intel-value--city">{locationCity}</div>}
           {locationCountry && (
-            <div className="intel-sub intel-sub--with-flag">
+            <div className="intel-sub intel-sub--with-flag intel-sub--country">
               <CountryFlag country={locationCountry} square className="stores-tab-flag" />
               {locationCountry}
             </div>
           )}
           {!locationCity && !locationCountry && (
-            <div className="intel-sub">—</div>
+            <div className="intel-sub intel-sub--location-empty">—</div>
           )}
         </div>
 
         {/* Currency */}
-        <div className="intel-card col-3">
+        <div className="intel-card intel-card--currency col-3">
           <div className="intel-header">
             <div className="icon green"><DollarSign size={13} /></div>
             Currency
           </div>
-          <div className="intel-value">{currencyCode ?? '—'}</div>
+          <div className="intel-value intel-value--currency">{currencyCode ?? '—'}</div>
         </div>
 
         {/* Ships To */}
-        <div className="intel-card col-3">
+        <div className="intel-card intel-card--ships-to col-3">
           <div className="intel-header">
             <div className="icon blue"><Globe size={13} /></div>
             {shipsTo.length > 0
@@ -787,7 +671,7 @@ export default function OverviewPage({
               : 'Ships To'}
           </div>
           {shipsTo.length > 0 ? (
-            <div style={{ marginTop: 4 }}>
+            <div className="intel-ships-to-body" style={{ marginTop: 4 }}>
               <div className="ships-to-flags-grid">
                 {shipsTo.slice(0, 9).map((code, i) => (
                   <span
@@ -811,15 +695,15 @@ export default function OverviewPage({
               )}
             </div>
           ) : (
-            <div className="intel-sub" style={{ marginTop: 4 }}>—</div>
+            <div className="intel-sub intel-sub--ships-to-empty" style={{ marginTop: 4 }}>—</div>
           )}
         </div>
 
         {/* Social Media */}
-        <div className="intel-card col-3">
+        <div className="intel-card intel-card--social col-3">
           <div className="intel-header">Social Media</div>
           {socialEntries.length > 0 ? (
-            <div className="social-icons-container">
+            <div className="social-icons-container intel-social-links">
               {socialEntries.map(([platform, href]) => (
                 <a
                   key={platform}
@@ -843,35 +727,35 @@ export default function OverviewPage({
               )}
             </div>
           ) : (
-            <div className="intel-sub" style={{ marginTop: 4 }}>Not found yet</div>
+            <div className="intel-sub intel-sub--social-empty" style={{ marginTop: 4 }}>Not found yet</div>
           )}
         </div>
 
         {/* Description */}
-        <div className="intel-card col-4">
+        <div className="intel-card intel-card--description col-4">
           <div className="intel-header">
             <div className="icon orange"><FileText size={13} /></div>
             Description
           </div>
-          <p className="about-text">{description ?? '—'}</p>
+          <p className="about-text intel-value--description">{description ?? '—'}</p>
         </div>
 
         {/* Payment Methods */}
-        <div className="intel-card col-5">
+        <div className="intel-card intel-card--payments col-5">
           <div className="intel-header">
             <div className="icon purple"><CreditCard size={13} /></div>
             Payment Methods
           </div>
           {cards.length > 0 ? (
-            <div className="payment-methods">
+            <div className="payment-methods intel-value--payment-brands">
               {cards.map((card) => (
                 <PaymentBrandIcon key={card} brand={card} />
               ))}
             </div>
           ) : (
-            <div className="payment-methods">—</div>
+            <div className="payment-methods intel-value--payment-brands">—</div>
           )}
-          <div className="shop-pay-row">
+          <div className="shop-pay-row intel-value--shop-pay">
             Shop Pay Installments
             <span className={`status-badge${shopPayEnabled ? '' : ' disabled'}`}>
               {shopPayEnabled ? <Check size={10} /> : null}
@@ -881,22 +765,22 @@ export default function OverviewPage({
         </div>
 
         {/* Estimated Age */}
-        <div className="intel-card col-3">
+        <div className="intel-card intel-card--estimated-age col-3">
           <div className="intel-header">
             <div className="icon gray"><Clock size={13} /></div>
             Estimated Age
           </div>
           {estimatedAge ? (
             <div className="estimated-age-block">
-              <div className="intel-value" style={{ marginTop: 4 }}>
+              <div className="intel-value intel-value--estimated-age" style={{ marginTop: 4 }}>
                 {formatStoreAgeSummary(estimatedAge)}
               </div>
-              <small className="age-first-published">
+              <small className="age-first-published intel-sub--first-published">
                 first product published on {formatFirstProductPublishedLine(estimatedAge)}
               </small>
             </div>
           ) : (
-            <div className="intel-sub" style={{ marginTop: 4 }}>—</div>
+            <div className="intel-sub intel-sub--estimated-age-empty" style={{ marginTop: 4 }}>—</div>
           )}
         </div>
 
@@ -952,9 +836,18 @@ export default function OverviewPage({
             className="store-debug-btn"
             disabled={debugBusy || reSyncBusy}
             onClick={() => void onDebugFetchAppsFromHtml()}
-            title="Fetches HTML once, then parses Shopify.theme and app matches from it"
+            title="Fetches HTML once, then parses Shopify.theme, app matches, and emails from it"
           >
-            Fetch Apps
+            Fetch App/Theme/Email
+          </button>
+          <button
+            type="button"
+            className="store-debug-btn"
+            disabled={debugBusy || reSyncBusy}
+            onClick={() => void onDebugFetchMetaJson()}
+            title="Fetches /meta.json from active storefront tab and logs it in popup console"
+          >
+            meta.json
           </button>
         </div>
       </div>

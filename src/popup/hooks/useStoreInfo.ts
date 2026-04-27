@@ -4,13 +4,15 @@ import {
   checkActiveTabHasShopifyTheme,
   fetchAllData,
   loadPopupStoreBundle,
-  loadStoreMetadataFromExtension,
-  requestContentShopScanFromPopup,
-  resolveActiveTabShopDomain,
+  spykitFetchThemeAndAppsFromHtml,
+  spykitFetchAndPersistMetaJson,
+  type SpykitDebugAllResponse,
   type PopupStoreBundle,
 } from '../lib/popupStoreLoader'
+import type { ShopMetaJson } from '../../types'
 import { syncPopupStoreData } from '../windowStoreData'
 import { useSpykitStore } from '../store/useSpykitStore'
+import type { ShopifyTheme } from '../../types'
 
 function bundleHasThemeRow(bundle: PopupStoreBundle | null): boolean {
   const si = bundle?.storeInfo
@@ -50,7 +52,29 @@ export function useStoreInfo(): void {
     let cancelled = false
 
     async function applyBundle(bundle: Awaited<ReturnType<typeof loadPopupStoreBundle>>) {
-      const si = bundle?.storeInfo ?? null
+      const current = useSpykitStore.getState().storeInfo
+      const incoming = bundle?.storeInfo ?? null
+
+      // Merge: never discard a good theme/apps already in Zustand with empty bundle data.
+      // This prevents fetchAllData (reading chrome.storage) from overwriting theme/apps
+      // that were freshly parsed from HTML by applyThemeAppsSnapshot moments before.
+      const si: typeof incoming = incoming == null ? null : {
+        ...incoming,
+        theme: incoming.theme ?? current?.theme ?? null,
+        shopifyThemeRaw: incoming.shopifyThemeRaw ?? current?.shopifyThemeRaw ?? null,
+        appDetectionResult: incoming.appDetectionResult ?? current?.appDetectionResult ?? null,
+        // Preserve freshly-fetched shopMeta from step 3 if the bundle hasn't caught up yet.
+        shopMeta: incoming.shopMeta ?? current?.shopMeta ?? null,
+        productCount:
+          (incoming.shopMeta?.published_products_count ?? incoming.productCount)
+          || (current?.shopMeta?.published_products_count ?? current?.productCount)
+          || incoming.productCount,
+        collectionCount:
+          (incoming.shopMeta?.published_collections_count ?? incoming.collectionCount)
+          || (current?.shopMeta?.published_collections_count ?? current?.collectionCount)
+          || incoming.collectionCount,
+      }
+
       await syncPopupStoreData(si)
 
       const p = bundle?.products ?? window.storeData?.products ?? []
@@ -63,12 +87,85 @@ export function useStoreInfo(): void {
       }
     }
 
+    async function applyThemeAppsSnapshot(snapshot: SpykitDebugAllResponse) {
+      if (!snapshot.ok || cancelled) return
+      const prev = useSpykitStore.getState().storeInfo
+      const normalizedTheme: ShopifyTheme | null =
+        snapshot.theme && Object.keys(snapshot.theme).length > 0
+          ? {
+              ...snapshot.theme,
+              name:
+                snapshot.theme.name != null && String(snapshot.theme.name).trim()
+                  ? String(snapshot.theme.name)
+                  : 'Unknown',
+              version:
+                snapshot.theme.version != null ? String(snapshot.theme.version) : '',
+              author:
+                snapshot.theme.author != null && String(snapshot.theme.author).trim()
+                  ? String(snapshot.theme.author)
+                  : 'Shopify',
+              isOS2: Boolean(snapshot.theme.isOS2),
+            }
+          : null
+      const merged = {
+        ...(prev ?? {
+          domain: snapshot.domain,
+          theme: null,
+          appDetectionResult: null,
+          productCount: 0,
+          collectionCount: 0,
+          detectedAt: Date.now(),
+          catalogFullDataInIndexedDb: false,
+        }),
+        domain: snapshot.domain,
+        theme: normalizedTheme,
+        shopifyThemeRaw: snapshot.shopifyThemeRaw ?? null,
+        appDetectionResult: snapshot.appDetectionResult ?? null,
+        detectedAt: Date.now(),
+      }
+      setStoreInfo(merged)
+      await syncPopupStoreData(merged)
+      console.log('[SpyKit Popup] Zustand snapshot (theme+apps)', useSpykitStore.getState())
+    }
+
+    // Merge shopMeta into current Zustand storeInfo and re-sync window.storeData.
+    // Called immediately after meta.json is fetched so stat boxes + intelligence populate.
+    async function applyMetaJson(meta: ShopMetaJson) {
+      if (cancelled) return
+      const prev = useSpykitStore.getState().storeInfo
+      if (!prev) return
+      const merged = {
+        ...prev,
+        shopMeta: meta,
+        // Pre-fill counts from meta so UI shows numbers before IDB catalog loads.
+        productCount:
+          typeof meta.published_products_count === 'number'
+            ? meta.published_products_count
+            : prev.productCount,
+        collectionCount:
+          typeof meta.published_collections_count === 'number'
+            ? meta.published_collections_count
+            : prev.collectionCount,
+      }
+      setStoreInfo(merged)
+      await syncPopupStoreData(merged)
+      console.log('[SpyKit Popup] useStoreInfo: meta.json applied', {
+        products: merged.productCount,
+        collections: merged.collectionCount,
+        name: meta.name,
+      })
+    }
+
     async function runLoad() {
       console.log('[SpyKit Popup] useStoreInfo: runLoad start')
+
+      // 1) Fast eligibility gate:
+      // only continue when the active tab looks like a Shopify storefront.
       const hasShopifyTheme = await checkActiveTabHasShopifyTheme()
       if (cancelled) return
 
       if (!hasShopifyTheme) {
+        // Keep store tab usable, but mark data pipeline as ineligible for this tab.
         console.log('[SpyKit Popup] useStoreInfo: tab has no Shopify.theme — ineligible')
         eligibleRef.current = false
         setStorefrontEligibility('ineligible')
@@ -77,45 +174,49 @@ export function useStoreInfo(): void {
         return
       }
 
+      // Eligible storefront tab: proceed with the full load sequence.
       eligibleRef.current = true
       setStorefrontEligibility('eligible')
 
-      // Check if we already have a cached theme for this store. If so, skip
-      // the expensive content scan (meta.json + app detection + contacts) —
-      // the user can always force a re-scan via the Re-sync button.
-      const hint = await resolveActiveTabShopDomain()
-      let hasCachedTheme = false
-      if (hint) {
-        const cached = await loadStoreMetadataFromExtension(hint)
-        hasCachedTheme =
-          cached?.theme != null ||
-          (cached?.shopifyThemeRaw != null &&
-            typeof cached.shopifyThemeRaw === 'object' &&
-            !Array.isArray(cached.shopifyThemeRaw) &&
-            Object.keys(cached.shopifyThemeRaw as object).length > 0)
+      // 2) Fetch theme + apps first from full HTML.
+      // This gives the UI an immediate, reliable snapshot before slower fetches.
+      setFetchStep('fetching-theme')
+      const scanRes = await spykitFetchThemeAndAppsFromHtml()
+      console.log('[SpyKit Popup] useStoreInfo: HTML theme+apps done', scanRes)
+      await applyThemeAppsSnapshot(scanRes)
+
+      // 3) Fetch meta.json immediately and hydrate Zustand.
+      // This populates product/collection counts + all Store Intelligence fields
+      // (location, currency, ships-to, description, payments) before the IDB catalog loads.
+      setFetchStep('fetching-store')
+      const metaRes = await spykitFetchAndPersistMetaJson()
+      if (cancelled) return
+      if (metaRes.ok && metaRes.meta) {
+        await applyMetaJson(metaRes.meta)
       }
 
-      if (!hasCachedTheme) {
-        const scanRes = await requestContentShopScanFromPopup()
-        console.log('[SpyKit Popup] useStoreInfo: SPYKIT_RUN_SHOP_SCAN done', scanRes)
-      } else {
-        console.log('[SpyKit Popup] useStoreInfo: cache hit — skipping content scan')
-      }
-
+      // 4) Continue the canonical pipeline (IDB catalog + final cache bundle).
       const bundle = await fetchAllData((step) => {
         if (!cancelled) setFetchStep(step)
       })
 
       if (cancelled) return
 
+      // 5) Apply merged bundle into Zustand/window.storeData.
+      // Merge logic preserves fresh theme/apps + shopMeta if bundle is temporarily behind.
       console.log('[SpyKit Popup] useStoreInfo: fetchAllData bundle', {
         domain: bundle?.domain,
         hasThemeRow: bundleHasThemeRow(bundle),
-        apps: bundle?.storeInfo?.apps?.length ?? 0,
+        apps:
+          Object.keys(
+            ((bundle?.storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)
+              ?.apps ?? {}) as Record<string, unknown>,
+          ).length,
         products: bundle?.products?.length ?? 0,
       })
       await applyBundle(bundle)
 
+      // 6) Mark pipeline complete for UI indicators.
       if (!cancelled) {
         setStoreInfoLoaded(true)
         setLastFetchedAt(Date.now())
@@ -124,11 +225,22 @@ export function useStoreInfo(): void {
       }
     }
 
+    // Hydrate Zustand immediately on popup open with the latest cached bundle (if any),
+    // so UI state is available in real-time while the full async flow continues.
+    void (async () => {
+      const earlyBundle = await loadPopupStoreBundle()
+      if (cancelled) return
+      if (earlyBundle) {
+        await applyBundle(earlyBundle)
+        setStoreInfoLoaded(true)
+        console.log('[SpyKit Popup] useStoreInfo: early Zustand hydrate applied')
+      }
+    })()
+
     void runLoad()
 
     const unsub = onStorageChange('storeCacheByDomain', () => {
       void (async () => {
-        if (!eligibleRef.current) return
         const bundle = await loadPopupStoreBundle()
         if (cancelled) return
         if (bundle) await applyBundle(bundle)
@@ -142,32 +254,22 @@ export function useStoreInfo(): void {
           console.warn('[SpyKit Popup] spykitLoadStore: skipped (tab not eligible)')
           return
         }
-        console.log('[SpyKit Popup] spykitLoadStore: start (re-run content scan + wait for cache)')
+        console.log('[SpyKit Popup] spykitLoadStore: start (re-fetch HTML → theme+apps → meta)')
 
-        const scanRes = await requestContentShopScanFromPopup()
-        console.log('[SpyKit Popup] spykitLoadStore: content scan finished', scanRes)
-
-        // After a force refresh, chrome.storage may lag PAGE_DATA; poll until theme row exists.
-        let bundle: Awaited<ReturnType<typeof loadPopupStoreBundle>> | null = null
-        for (let attempt = 0; attempt < 15; attempt++) {
-          bundle = await loadPopupStoreBundle()
-          const hasTheme = bundleHasThemeRow(bundle)
-          console.log('[SpyKit Popup] spykitLoadStore: cache poll', {
-            attempt: attempt + 1,
-            domain: bundle?.domain ?? null,
-            hasTheme,
-            apps: bundle?.storeInfo?.apps?.length ?? 0,
-            catalogLoading: bundle?.storeInfo?.catalogLoading,
-          })
-          if (hasTheme) break
-          await new Promise((r) => setTimeout(r, 220))
-        }
+        setFetchStep('fetching-theme')
+        const scanRes = await spykitFetchThemeAndAppsFromHtml()
+        console.log('[SpyKit Popup] spykitLoadStore: HTML theme+apps done', scanRes)
+        await applyThemeAppsSnapshot(scanRes)
 
         const finalBundle = await fetchAllData((step) => setFetchStep(step))
         console.log('[SpyKit Popup] spykitLoadStore: fetchAllData after poll', {
           domain: finalBundle?.domain,
           hasThemeRow: bundleHasThemeRow(finalBundle),
-          apps: finalBundle?.storeInfo?.apps?.length ?? 0,
+          apps:
+            Object.keys(
+              ((finalBundle?.storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)
+                ?.apps ?? {}) as Record<string, unknown>,
+            ).length,
           products: finalBundle?.products?.length ?? 0,
         })
 

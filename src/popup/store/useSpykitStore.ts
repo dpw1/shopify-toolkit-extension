@@ -4,6 +4,7 @@ import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 
 export type FetchStep =
   | 'idle'
+  | 'fetching-theme'
   | 'fetching-store'
   | 'fetching-collections'
   | 'fetching-products'

@@ -63,18 +63,26 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
   const t = getResolvedThemeForUI(storeInfo)
   const displayName = t?.name ?? '—'
   const [themeListEntry, setThemeListEntry] = useState<ThemeJsonEntry | null>(null)
+  const [catalogLookupDone, setCatalogLookupDone] = useState(false)
 
   useEffect(() => {
     const ac = new AbortController()
     let cancelled = false
+    setCatalogLookupDone(false)
     setThemeListEntry(null)
 
     void (async () => {
       try {
         const { catalogEntry } = await loadThemeWithJsonCatalog(storeInfo, ac.signal)
-        if (!cancelled) setThemeListEntry(catalogEntry)
+        if (!cancelled) {
+          setThemeListEntry(catalogEntry)
+          setCatalogLookupDone(true)
+        }
       } catch {
-        if (!cancelled) setThemeListEntry(null)
+        if (!cancelled) {
+          setThemeListEntry(null)
+          setCatalogLookupDone(true)
+        }
       }
     })()
 
@@ -83,6 +91,8 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
       ac.abort()
     }
   }, [storeInfo])
+
+  const isCustomTheme = Boolean(t) && catalogLookupDone && !themeListEntry
 
   const themeStoreUrl = themeListEntry?.themeURL ? appendUtmToUrl(themeListEntry.themeURL) : null
   const reviewsUrl = themeListEntry?.themeURL
@@ -95,14 +105,29 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
     themeListEntry?.demoURL ??
     null
   const liveDemoUrl = rawLiveDemoUrl ? appendUtmToUrl(rawLiveDemoUrl) : null
-  const creatorName = themeListEntry?.creator ?? t?.author ?? 'Shopify'
+  const creatorName = isCustomTheme ? 'Unknown' : (themeListEntry?.creator ?? t?.author ?? 'Shopify')
   const reviewsCount = themeListEntry?.reviews?.totalReviews
   const reviewStarRating = weightedReviewStars(themeListEntry?.reviews)
   const heroImageUrl =
     themeListEntry?.desktopImage ?? themeListEntry?.mobileImage ?? themeListEntry?.img ?? null
-  const themePriceLine = themeListEntry?.price ?? themeListEntry?.themePrice ?? null
+  const themePriceLine =
+    themeListEntry?.price ??
+    themeListEntry?.themePrice ??
+    (t?.role ? `Role: ${t.role}` : null)
   const versionPrefix = t ? `Version ${t.version || '—'}` : null
   const renamedValue = t?.themeRenamed && t.themeRenamed !== t.name ? t.themeRenamed : null
+  const fallbackDescription = isCustomTheme
+    ? 'unindefitified theme, probably custom.'
+    : t
+    ? [
+        t.schemaName ? `Schema: ${t.schemaName}` : null,
+        t.schemaVersion ? `v${t.schemaVersion}` : null,
+        t.themeId != null ? `ID: ${t.themeId}` : null,
+        t.role ? `Role: ${t.role}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '—'
 
   return (
     <>
@@ -132,62 +157,68 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
                 <> &bull; Renamed: <strong>{renamedValue}</strong></>
               )}
             </p>
-            <a
-              href={themeStoreUrl ?? '#'}
-              target="_blank"
-              rel="noreferrer"
-              className="theme-link flex-center"
-              onClick={(e) => {
-                if (!themeStoreUrl) e.preventDefault()
-              }}
-            >
-              View on Shopify Theme Store
-              <ArrowUpRight size={16} strokeWidth={2} aria-hidden />
-            </a>
+            {!isCustomTheme && (
+              <a
+                href={themeStoreUrl ?? '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="theme-link flex-center"
+                onClick={(e) => {
+                  if (!themeStoreUrl) e.preventDefault()
+                }}
+              >
+                View on Shopify Theme Store
+                <ArrowUpRight size={16} strokeWidth={2} aria-hidden />
+              </a>
+            )}
           </div>
         </div>
 
         <div className="theme-side-cards">
-          <div className="side-card">
-            <div className="side-card-icon purple">
-              <Users size={20} strokeWidth={2} aria-hidden />
-            </div>
-            <div>
-              {reviewStarRating != null ? (
-                <div className="theme-single-star-row">
-                  <Star size={14} fill="#f59e0b" color="#f59e0b" aria-hidden />
-                  <span className="theme-single-star-rating">{reviewStarRating.toFixed(1)}</span>
-                  {typeof reviewsCount === 'number' ? (
-                    reviewsUrl ? (
-                      <a
-                        href={reviewsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="theme-single-star-count theme-reviews-link"
-                      >
-                        ({reviewsCount.toLocaleString()} reviews)
-                      </a>
-                    ) : (
-                      <span className="theme-single-star-count">
-                        ({reviewsCount.toLocaleString()} reviews)
-                      </span>
-                    )
-                  ) : null}
+          {!isCustomTheme && (
+            <>
+              <div className="side-card">
+                <div className="side-card-icon purple">
+                  <Users size={20} strokeWidth={2} aria-hidden />
                 </div>
-              ) : (
-                <h4>—</h4>
-              )}
-            </div>
-          </div>
-          <div className="side-card">
-            <div className="side-card-icon amber">
-              <ThemeDollarIcon size={20} />
-            </div>
-            <div>
-              <h4>{themePriceLine ?? '—'}</h4>
-              <p>Theme price</p>
-            </div>
-          </div>
+                <div>
+                  {reviewStarRating != null ? (
+                    <div className="theme-single-star-row">
+                      <Star size={14} fill="#f59e0b" color="#f59e0b" aria-hidden />
+                      <span className="theme-single-star-rating">{reviewStarRating.toFixed(1)}</span>
+                      {typeof reviewsCount === 'number' ? (
+                        reviewsUrl ? (
+                          <a
+                            href={reviewsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="theme-single-star-count theme-reviews-link"
+                          >
+                            ({reviewsCount.toLocaleString()} reviews)
+                          </a>
+                        ) : (
+                          <span className="theme-single-star-count">
+                            ({reviewsCount.toLocaleString()} reviews)
+                          </span>
+                        )
+                      ) : null}
+                    </div>
+                  ) : (
+                    <h4>—</h4>
+                  )}
+                </div>
+              </div>
+              <div className="side-card">
+                <div className="side-card-icon amber">
+                  <ThemeDollarIcon size={20} />
+                </div>
+                <div>
+                  <h4>{themePriceLine ?? '—'}</h4>
+                  <p>Theme price</p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -197,34 +228,36 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
             <User size={14} strokeWidth={2} aria-hidden />
             Author
           </span>
-          <span className="meta-value">{themeListEntry?.creator ?? '—'}</span>
+          <span className="meta-value">{creatorName}</span>
         </div>
         <div className="meta-item meta-item-description">
           <span className="meta-label">
             <FileText size={14} strokeWidth={2} aria-hidden />
             Description
           </span>
-          <small className="meta-value">{themeListEntry?.description ?? '—'}</small>
+          <small className="meta-value">{themeListEntry?.description ?? fallbackDescription}</small>
         </div>
-        <div className="meta-item meta-item-demo">
-          <span className="meta-label">
-            <LifeBuoy size={14} strokeWidth={2} aria-hidden />
-            Demo
-          </span>
-          <a
-            href={liveDemoUrl ?? '#'}
-            target="_blank"
-            rel="noreferrer"
-            className="theme-link flex-center"
-            style={{ fontSize: 'var(--text-sm)' }}
-            onClick={(e) => {
-              if (!liveDemoUrl) e.preventDefault()
-            }}
-          >
-            Live demo
-            <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
-          </a>
-        </div>
+        {!isCustomTheme && (
+          <div className="meta-item meta-item-demo">
+            <span className="meta-label">
+              <LifeBuoy size={14} strokeWidth={2} aria-hidden />
+              Demo
+            </span>
+            <a
+              href={liveDemoUrl ?? '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="theme-link flex-center"
+              style={{ fontSize: 'var(--text-sm)' }}
+              onClick={(e) => {
+                if (!liveDemoUrl) e.preventDefault()
+              }}
+            >
+              Live demo
+              <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
+            </a>
+          </div>
+        )}
       </div>
 
       {(heroImageUrl || themeListEntry?.mobileImage) && (

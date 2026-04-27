@@ -112,6 +112,7 @@ async function persistStoreThemeFromPagePayload(
   themeRaw: Partial<ShopifyTheme> | undefined,
   rawThemeObj: Record<string, unknown> | null | undefined,
   apps: ShopifyApp[] | undefined,
+  appDetectionResult: Record<string, unknown> | null | undefined,
 ): Promise<void> {
   const key = normalizeStoreDomainKey(domain)
   const map = await loadCacheMap()
@@ -135,6 +136,9 @@ async function persistStoreThemeFromPagePayload(
   if (apps !== undefined) {
     patch.apps = apps
   }
+  if (appDetectionResult !== undefined) {
+    patch.appDetectionResult = appDetectionResult
+  }
 
   await saveCacheMeta(domain, patch, existing)
 }
@@ -146,6 +150,12 @@ async function persistStoreThemeFromPagePayload(
  * Products / collections are intentionally dropped — they now live in IDB.
  */
 function storeInfoToMeta(info: StoreInfo, key: string): StoreCacheMeta {
+  const appsFromDetection = Object.values(
+    ((info.appDetectionResult as { apps?: Record<string, unknown> } | null)?.apps ?? {}) as Record<
+      string,
+      unknown
+    >,
+  ) as ShopifyApp[]
   return {
     domain: info.domain || key,
     storeName: info.storeName,
@@ -155,7 +165,8 @@ function storeInfoToMeta(info: StoreInfo, key: string): StoreCacheMeta {
     shopifyThemeRaw: info.shopifyThemeRaw,
     shopMeta: info.shopMeta,
     storeContacts: info.storeContacts,
-    apps: info.apps ?? [],
+    apps: appsFromDetection,
+    appDetectionResult: info.appDetectionResult ?? null,
     productCount: info.productCount ?? 0,
     collectionCount: info.collectionCount ?? 0,
     catalogLoading: info.catalogLoading,
@@ -175,7 +186,7 @@ function metaToStoreInfo(meta: StoreCacheMeta): StoreInfo {
     shopifyThemeRaw: meta.shopifyThemeRaw,
     shopMeta: meta.shopMeta,
     storeContacts: meta.storeContacts,
-    apps: meta.apps,
+    appDetectionResult: meta.appDetectionResult ?? null,
     productCount: meta.productCount,
     collectionCount: meta.collectionCount,
     detectedAt: meta.detectedAt,
@@ -695,9 +706,15 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
   }
 
   if (msg.type === 'PAGE_DATA') {
-    const { domain, theme: themeRaw, apps, shopifyThemeRaw: rawThemeObj } = msg.payload
+    const {
+      domain,
+      theme: themeRaw,
+      apps,
+      shopifyThemeRaw: rawThemeObj,
+      standaloneResult: appDetectionResult,
+    } = msg.payload
     void (async () => {
-      await persistStoreThemeFromPagePayload(domain, themeRaw, rawThemeObj, apps)
+      await persistStoreThemeFromPagePayload(domain, themeRaw, rawThemeObj, apps, appDetectionResult)
       log('Stored PAGE_DATA for', normalizeStoreDomainKey(domain), {
         theme: normalizeThemePayload(themeRaw)?.name,
       })
@@ -707,24 +724,32 @@ chrome.runtime.onMessage.addListener((rawMsg: unknown, _sender, sendResponse) =>
   if (msg.type === 'SPYKIT_THEME_FROM_MAIN_WORLD' && msg.from === 'popup') {
     const { domain, theme, shopifyThemeRaw } = msg.payload
     void (async () => {
-      await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, undefined)
-      log('Stored theme (MAIN inject) for', normalizeStoreDomainKey(domain))
+      try {
+        await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, undefined, undefined)
+        log('Stored theme (MAIN inject) for', normalizeStoreDomainKey(domain))
+        sendResponse({ ok: true })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
     })()
-    sendResponse({ ok: true })
-    return false
+    return true
   }
 
   if (msg.type === 'SPYKIT_STORE_SNAPSHOT_FROM_POPUP' && msg.from === 'popup') {
-    const { domain, theme, shopifyThemeRaw, apps } = msg.payload
+    const { domain, theme, shopifyThemeRaw, apps, appDetectionResult } = msg.payload
     void (async () => {
-      await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, apps)
-      log('Stored snapshot (popup-detected) for', normalizeStoreDomainKey(domain), {
-        theme: theme?.name,
-        apps: apps.length,
-      })
+      try {
+        await persistStoreThemeFromPagePayload(domain, theme, shopifyThemeRaw, apps, appDetectionResult)
+        log('Stored snapshot (popup-detected) for', normalizeStoreDomainKey(domain), {
+          theme: theme?.name,
+          apps: apps.length,
+        })
+        sendResponse({ ok: true })
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) })
+      }
     })()
-    sendResponse({ ok: true })
-    return false
+    return true
   }
 
   if (msg.type === 'SHOP_META') {

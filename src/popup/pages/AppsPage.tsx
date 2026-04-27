@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import type { PopupSettings, ShopifyApp, StoreInfo } from '../../types'
+import { appendUtmToUrl } from '../lib/appendUtm'
 
 type SortKey = 'rating' | 'reviews' | 'name'
 
@@ -201,6 +202,11 @@ function AppCard({ app, appKey, expanded, onToggleExpanded, onImageOpen }: AppCa
       })()
     : null
 
+  const sourceAppUrl = app.sourceAppUrl ? appendUtmToUrl(app.sourceAppUrl) : null
+  const developerPartnerUrl = app.developerPartnerUrl ? appendUtmToUrl(app.developerPartnerUrl) : null
+  const viewDemoStoreUrl = app.viewDemoStoreUrl ? appendUtmToUrl(app.viewDemoStoreUrl) : null
+  const reviewUrl = app.reviewUrl ? appendUtmToUrl(app.reviewUrl) : null
+
   return (
     <div className="app-card" id={`app-card-${appKey}`}>
       <div className="card-header">
@@ -212,26 +218,33 @@ function AppCard({ app, appKey, expanded, onToggleExpanded, onImageOpen }: AppCa
           )}
           <div className="app-info">
             <h3>
-              {app.sourceAppUrl ? (
-                <a href={app.sourceAppUrl} className="app-title-link" target="_blank" rel="noreferrer">
+              {sourceAppUrl ? (
+                <a href={sourceAppUrl} className="app-title-link" target="_blank" rel="noreferrer">
                   {app.appTitle ?? app.name}
                 </a>
               ) : (
                 (app.appTitle ?? app.name)
               )}
               <span className={`app-tag ${categoryClass}`}>{categoryLabel}</span>
-              {app.sourceAppUrl && (
-                <a href={app.sourceAppUrl} target="_blank" rel="noreferrer" className="app-link-icon" title="View in App Store">
+              {sourceAppUrl && (
+                <a href={sourceAppUrl} target="_blank" rel="noreferrer" className="app-link-icon" title="View in App Store">
                   <ExternalLink size={14} />
                 </a>
               )}
             </h3>
             <div className="app-meta-row">
               {app.developerPartnerName && (
-                <span className="app-developer">
-                  by {app.developerPartnerName}
-                  <CheckCircle size={13} />
-                </span>
+                developerPartnerUrl ? (
+                  <a href={developerPartnerUrl} target="_blank" rel="noreferrer" className="app-developer">
+                    by {app.developerPartnerName}
+                    <CheckCircle size={13} />
+                  </a>
+                ) : (
+                  <span className="app-developer">
+                    by {app.developerPartnerName}
+                    <CheckCircle size={13} />
+                  </span>
+                )
               )}
               {rating != null && (
                 <span className="app-rating-inline">
@@ -292,8 +305,8 @@ function AppCard({ app, appKey, expanded, onToggleExpanded, onImageOpen }: AppCa
                         <StarRow rating={rating} size={16} />
                       </div>
                       <p>({reviewTotal.toLocaleString()} reviews)</p>
-                      {app.reviewUrl && (
-                        <a href={app.reviewUrl} target="_blank" rel="noreferrer" className="view-reviews">
+                      {reviewUrl && (
+                        <a href={reviewUrl} target="_blank" rel="noreferrer" className="view-reviews">
                           View reviews <ExternalLink size={11} />
                         </a>
                       )}
@@ -381,8 +394,8 @@ function AppCard({ app, appKey, expanded, onToggleExpanded, onImageOpen }: AppCa
                   <User size={16} className="meta-icon" />
                   <div className="meta-cnt">
                     <h5>Developer</h5>
-                    {app.developerPartnerUrl ? (
-                      <a href={app.developerPartnerUrl} target="_blank" rel="noreferrer">
+                    {developerPartnerUrl ? (
+                      <a href={developerPartnerUrl} target="_blank" rel="noreferrer">
                         {app.developerPartnerName} <ExternalLink size={11} />
                       </a>
                     ) : (
@@ -423,15 +436,15 @@ function AppCard({ app, appKey, expanded, onToggleExpanded, onImageOpen }: AppCa
             </div>
 
             <div className="card-actions-bottom">
-              {app.viewDemoStoreUrl ? (
-                <a href={app.viewDemoStoreUrl} target="_blank" rel="noreferrer" className="apps-btn-primary">
+              {viewDemoStoreUrl ? (
+                <a href={viewDemoStoreUrl} target="_blank" rel="noreferrer" className="apps-btn-primary">
                   View demo store <ExternalLink size={14} />
                 </a>
               ) : (
                 <span />
               )}
-              {app.sourceAppUrl ? (
-                <a href={app.sourceAppUrl} target="_blank" rel="noreferrer" className="apps-btn-secondary">
+              {sourceAppUrl ? (
+                <a href={sourceAppUrl} target="_blank" rel="noreferrer" className="apps-btn-secondary">
                   View in Shopify App Store <ExternalLink size={14} />
                 </a>
               ) : (
@@ -483,7 +496,14 @@ export default function AppsPage({
   const sortRef = useRef<HTMLDivElement>(null)
   const didRestoreRef = useRef(false)
 
-  const apps = storeInfo?.apps ?? []
+  const apps = useMemo(
+    () =>
+      Object.values(
+        ((storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)?.apps ??
+          {}) as Record<string, unknown>,
+      ) as ShopifyApp[],
+    [storeInfo],
+  )
 
   useEffect(() => {
     if (!sortOpen) return

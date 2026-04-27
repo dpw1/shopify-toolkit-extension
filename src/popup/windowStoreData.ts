@@ -3,6 +3,7 @@ import { normalizeStoreDomainKey } from '../lib/storeDomain'
 import type {
   CatalogCollectionRow,
   CatalogProductRow,
+  ShopifyApp,
   SpyKitStoreData,
   StoreInfo,
 } from '../types'
@@ -35,6 +36,7 @@ export async function syncPopupStoreData(storeInfo: StoreInfo | null): Promise<v
       themeRenamed: '',
       themeNormalized: null,
       apps: [],
+      appDetectionResult: null,
       domain: '',
       shopMeta: null,
       storeName: '',
@@ -72,7 +74,14 @@ export async function syncPopupStoreData(storeInfo: StoreInfo | null): Promise<v
     themeSchemaVersion: str(raw?.schema_version) || tn?.version || '',
     themeRenamed: str(raw?.name) || tn?.themeRenamed || '',
     themeNormalized: tn,
-    apps: storeInfo.apps ?? [],
+    apps:
+      Object.values(
+        ((storeInfo.appDetectionResult as { apps?: Record<string, unknown> } | null)?.apps ?? {}) as Record<
+          string,
+          unknown
+        >,
+      ) as ShopifyApp[],
+    appDetectionResult: storeInfo.appDetectionResult ?? null,
     domain: storeInfo.domain,
     shopMeta: storeInfo.shopMeta ?? null,
     storeName:

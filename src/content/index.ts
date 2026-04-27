@@ -335,14 +335,16 @@ function collectStoreContacts(): StoreContacts {
   document.querySelectorAll('a[href^="mailto:"]').forEach((el) => {
     const raw = (el as HTMLAnchorElement).getAttribute('href') || ''
     const email = raw.replace('mailto:', '').split('?')[0].trim().toLowerCase()
-    if (email && !emailBlacklist.some((ex) => email.includes(ex))) {
+    if (email && !email.includes('@js.') && !emailBlacklist.some((ex) => email.includes(ex))) {
       emailsFound.add(email)
     }
   })
 
   const bodyText = document.body?.innerText || ''
   for (const e of bodyText.match(emailPattern) || []) {
-    if (!emailBlacklist.some((ex) => e.includes(ex))) emailsFound.add(e.toLowerCase())
+    const normalized = e.toLowerCase()
+    if (normalized.includes('@js.')) continue
+    if (!emailBlacklist.some((ex) => normalized.includes(ex))) emailsFound.add(normalized)
   }
 
   return { social, emails: [...emailsFound] }

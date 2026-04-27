@@ -14,6 +14,7 @@ import type {
   CatalogCollectionRow,
   CatalogProductRow,
   ExtMessage,
+  ShopMetaJson,
   ShopifyApp,
   ShopifyTheme,
   StoreInfo,
@@ -298,6 +299,325 @@ export async function loadCatalogFromIndexedDb(domain: string): Promise<{
   return { products, collections }
 }
 
+// ─── HTML-based theme + apps detection (official pipeline) ────────────────────
+
+/**
+ * Parse `Shopify.theme` out of an HTML string using DOMParser.
+ * Looks for an inline `<script>` in `<head>` that assigns `Shopify.theme = {...}`.
+ */
+export function getShopifyThemeFromHtml(htmlString: string): Record<string, unknown> | null {
+  try {
+    const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+    const script = Array.from(doc.querySelectorAll('head script:not([src]):not([class])')).find(
+      (s) => (s.textContent ?? '').includes('Shopify.theme'),
+    )
+    if (!script) return null
+    const match = (script.textContent ?? '').match(/Shopify\.theme\s*=\s*(\{[^;]+\})/)
+    if (!match?.[1]) return null
+    return JSON.parse(match[1]) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Detects Shopify apps from a parsed HTML string.
+ * Fetches the app catalog, matches patterns against script/link tags and DOM selectors,
+ * then returns a detailed result object (compatible with `samples/app-domparser.js`).
+ */
+export async function detectAppsFromHtmlString(
+  htmlString: string,
+): Promise<Record<string, unknown>> {
+  const APPS_JSON_URL =
+    'https://pandatests.myshopify.com/cdn/shop/t/70/assets/apps.json?v=126819430410946608741777188403'
+
+  const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+  if (doc.querySelector('parsererror')) throw new Error('Invalid HTML string provided.')
+
+  const fetchJSON = async (url: string): Promise<Array<Record<string, unknown>>> => {
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) throw new Error(`Failed to fetch catalog: ${res.status} ${res.statusText}`)
+    const data = await res.json()
+    if (!Array.isArray(data)) throw new Error('Invalid catalog format')
+    return data as Array<Record<string, unknown>>
+  }
+
+  const getAppName = (app: Record<string, unknown>) =>
+    app['appTitle'] || app['name'] || (app['id'] != null ? `App #${app['id']}` : 'Unknown App')
+
+  const getAppCategory = (app: Record<string, unknown>) => {
+    const cat = app['category']
+    if (typeof cat === 'string' && cat.trim()) return cat
+    try {
+      const cats = JSON.parse(String(app['categoriesJson'] ?? '[]')) as unknown
+      if (Array.isArray(cats) && typeof cats[0] === 'string' && (cats[0] as string).trim())
+        return cats[0] as string
+    } catch { /* ignore */ }
+    return 'Uncategorized'
+  }
+
+  const getAppKey = (app: Record<string, unknown>) =>
+    app['id']?.toString() || String(getAppName(app))
+
+  const matchesPattern = (text: unknown, patterns: unknown): boolean =>
+    Array.isArray(patterns) &&
+    patterns.some((p) => String(text ?? '').toLowerCase().includes(String(p).toLowerCase()))
+
+  const scripts = [...doc.querySelectorAll('script')]
+  const links = [...doc.querySelectorAll('link[href]')]
+
+  const detectByDOM = (app: Record<string, unknown>) =>
+    ((app['domSelectors'] as string[]) || [])
+      .map((sel: string) => {
+        try { return doc.querySelectorAll(sel).length } catch { return 0 }
+      })
+      .filter((count: number) => count > 0)
+      .map((count: number, i: number) =>
+        `(DOM: ${count} x ${(app['domSelectors'] as string[])[i]})`,
+      )
+
+  const detected = new Map<string, Record<string, unknown>>()
+  const addDetection = (app: Record<string, unknown>, sources: string[]) => {
+    const key = getAppKey(app)
+    if (!detected.has(key)) {
+      detected.set(key, {
+        ...app,
+        name: getAppName(app),
+        category: getAppCategory(app),
+        sourceAppUrl: app['sourceAppUrl'] || null,
+        appIconUrl: app['appIconUrl'] || null,
+        scripts: [],
+      })
+    }
+    const entry = detected.get(key)!
+    ;(sources as string[]).forEach((src) => {
+      const s = entry['scripts'] as string[]
+      if (src && !s.includes(src)) s.push(src)
+    })
+  }
+
+  const catalog = await fetchJSON(APPS_JSON_URL)
+
+  for (const app of catalog) {
+    const srcs = [
+      ...new Set([
+        ...scripts
+          .map((s) => s.src || s.getAttribute('src') || '')
+          .filter((src) => matchesPattern(src, app['patterns'])),
+        ...links
+          .map((l) => (l as HTMLLinkElement).href || l.getAttribute('href') || '')
+          .filter((href) => matchesPattern(href, app['patterns'])),
+      ]),
+    ]
+    const domHits = detectByDOM(app)
+    if (srcs.length || domHits.length) addDetection(app, [...srcs, ...domHits])
+  }
+
+  scripts.forEach((script) => {
+    const src = script.src || script.getAttribute('src') || ''
+    if (!src) return
+    const isShopify =
+      src.includes('shopify.com') &&
+      (src.includes('extensions') || src.includes('proxy') || src.includes('apps'))
+    const hasShop = src.includes('.js') && src.includes('?shop=')
+    if (isShopify || hasShop) {
+      const match = catalog.find((app) => matchesPattern(src, app['patterns']))
+      if (match) addDetection(match, [src])
+    }
+  })
+
+  const sectionCount = doc.querySelectorAll(
+    "[id*='shopify-section'] > [class*='_ss_'][class*='section-template']",
+  ).length
+  if (sectionCount) {
+    addDetection(
+      { id: 'sections-store-dom', appTitle: 'Sections Store', category: 'Page Builders' },
+      [`(DOM: ${sectionCount} section-template elements)`],
+    )
+  }
+
+  const allScriptSrcs = new Set(
+    [...detected.values()].flatMap((app) =>
+      (app['scripts'] as string[]).filter((s) => s?.startsWith('http')),
+    ),
+  )
+  const headScripts = doc.head?.querySelectorAll('script') || []
+  const bodyScripts = doc.body?.querySelectorAll('script') || []
+
+  const result = {
+    url: null,
+    source_apps_url: APPS_JSON_URL,
+    catalog_total: catalog.length,
+    detected_apps: [...detected.values()],
+    apps: Object.fromEntries([...detected.entries()].map(([_, v]) => [v['name'], v])),
+    total_detected: detected.size,
+    total_head_scripts: headScripts.length,
+    total_body_scripts: bodyScripts.length,
+    total_scripts: headScripts.length + bodyScripts.length,
+    total_stylesheets: doc.querySelectorAll("link[rel='stylesheet']").length,
+    section_store_count: sectionCount,
+    detected_script_srcs: [...allScriptSrcs],
+  }
+
+  console.log('%c Shopify App Detector — Results', 'font-size:16px;font-weight:bold;color:#96bf48')
+  console.log('────────────────────────────────────────')
+  console.log(`Apps detected: ${result.total_detected}`)
+  console.log(`Scripts: head=${result.total_head_scripts}, body=${result.total_body_scripts}`)
+  if (sectionCount) console.log(`Section Store sections: ${sectionCount}`)
+  console.log('────────────────────────────────────────')
+  if (result.detected_script_srcs.length) console.log('Detected script URLs:', result.detected_script_srcs)
+  if (Object.keys(result.apps).length) console.log('Apps:', result.apps)
+  else console.log('No apps detected.')
+
+  ;(window as Window & { __shopifyApps?: unknown }).__shopifyApps = result
+  return result
+}
+
+/**
+ * Extract contact emails from full storefront HTML.
+ * Mirrors the content-script regex + blacklist behavior.
+ */
+export function extractEmailsFromHtmlString(htmlString: string): string[] {
+  const emailBlacklist = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.ico', 'sentry.io']
+  const emailPattern = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+  const emailsFound = new Set<string>()
+
+  for (const e of htmlString.match(emailPattern) || []) {
+    const normalized = e.trim().toLowerCase()
+    if (!normalized) continue
+    if (normalized.includes('@js.')) continue
+    if (!emailBlacklist.some((ex) => normalized.includes(ex))) emailsFound.add(normalized)
+  }
+
+  try {
+    const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+    doc.querySelectorAll('a[href^="mailto:"]').forEach((el) => {
+      const raw = (el as HTMLAnchorElement).getAttribute('href') ?? ''
+      const email = raw.replace('mailto:', '').split('?')[0].trim().toLowerCase()
+      if (email && !email.includes('@js.') && !emailBlacklist.some((ex) => email.includes(ex))) {
+        emailsFound.add(email)
+      }
+    })
+  } catch {
+    // no-op
+  }
+
+  return [...emailsFound]
+}
+
+/**
+ * Official entry point for theme + apps detection.
+ * Fetches the active tab's full HTML, then runs DOMParser-based extraction
+ * for both `Shopify.theme` and the app catalog — all in the popup process.
+ * Persists the result to the background cache so it is visible on all tabs.
+ */
+export async function spykitFetchThemeAndAppsFromHtml(): Promise<SpykitDebugAllResponse> {
+  emitSpykitToast('Fetching theme & apps...')
+  const htmlRes = await spykitDebugFetchHtmlFromActiveTab()
+  if (!htmlRes.ok) return { ok: false, error: htmlRes.error }
+  console.log('[SpyKit Popup] theme+apps: html fetched', {
+    url: htmlRes.url,
+    htmlLength: htmlRes.html.length,
+  })
+
+  let domain: string
+  try {
+    domain = normalizeStoreDomainKey(new URL(htmlRes.url).hostname)
+  } catch {
+    domain = normalizeStoreDomainKey(htmlRes.url)
+  }
+
+  // Same as debug "fetch apps": one HTML fetch, parse theme + apps from that string.
+  const rawTheme = getShopifyThemeFromHtml(htmlRes.html)
+  const theme: Partial<ShopifyTheme> =
+    rawTheme == null
+      ? {}
+      : {
+          name:
+            rawTheme['schema_name'] != null && String(rawTheme['schema_name']).trim()
+              ? String(rawTheme['schema_name']).trim()
+              : 'Unknown',
+          version:
+            rawTheme['schema_version'] != null && String(rawTheme['schema_version']).trim()
+              ? String(rawTheme['schema_version']).trim()
+              : '',
+          themeRenamed: rawTheme['name'] != null ? String(rawTheme['name']) : undefined,
+          themeId: typeof rawTheme['id'] === 'number' ? rawTheme['id'] : undefined,
+          schemaName: rawTheme['schema_name'] != null ? String(rawTheme['schema_name']) : null,
+          schemaVersion: rawTheme['schema_version'] != null ? String(rawTheme['schema_version']) : null,
+          themeStoreId: rawTheme['theme_store_id'] != null ? Number(rawTheme['theme_store_id']) : null,
+          role: rawTheme['role'] != null ? String(rawTheme['role']) : null,
+          themeHandle:
+            rawTheme['handle'] == null || rawTheme['handle'] === 'null'
+              ? null
+              : String(rawTheme['handle']),
+          author: 'Shopify',
+          isOS2: Boolean(rawTheme['schema_name']),
+        }
+  console.log('[SpyKit Popup] theme+apps: parsed theme', {
+    rawTheme,
+    normalizedTheme: theme,
+  })
+
+  const appsResult = await detectAppsFromHtmlString(htmlRes.html)
+  const rawDetectedApps = Array.isArray((appsResult as { detected_apps?: unknown }).detected_apps)
+    ? ((appsResult as { detected_apps: Array<Record<string, unknown>> }).detected_apps)
+    : []
+  const apps: ShopifyApp[] = rawDetectedApps.map((a) => {
+    const catRaw = String(a['category'] ?? '').toLowerCase()
+    const category: ShopifyApp['category'] =
+      catRaw.includes('marketing')
+        ? 'marketing'
+        : catRaw.includes('sales')
+          ? 'sales'
+          : catRaw.includes('review')
+            ? 'reviews'
+            : catRaw.includes('analytic')
+              ? 'analytics'
+              : 'other'
+    return {
+      id: String(a['id'] ?? a['name'] ?? 'unknown'),
+      name: String(a['name'] ?? 'Unknown App'),
+      category,
+      appTitle: a['appTitle'] != null ? String(a['appTitle']) : undefined,
+      appIconUrl: a['appIconUrl'] != null ? String(a['appIconUrl']) : null,
+      sourceAppUrl: a['sourceAppUrl'] != null ? String(a['sourceAppUrl']) : undefined,
+      matchScripts: Array.isArray(a['scripts'])
+        ? (a['scripts'] as unknown[]).filter((s): s is string => typeof s === 'string')
+        : [],
+    }
+  })
+  console.log('[SpyKit Popup] theme+apps: parsed apps', {
+    sourceAppsUrl: (appsResult as { source_apps_url?: unknown }).source_apps_url ?? null,
+    totalDetected: apps.length,
+    apps,
+    fullResult: appsResult,
+  })
+
+  const emails = extractEmailsFromHtmlString(htmlRes.html)
+  console.log('[SpyKit Popup] theme+apps: parsed emails', {
+    totalEmails: emails.length,
+    emails,
+  })
+
+  try {
+    await persistSnapshotToBackground(domain, theme, rawTheme, apps, appsResult)
+  } catch (e) {
+    console.warn('[SpyKit Popup] spykitFetchThemeAndAppsFromHtml: persist failed', e)
+  }
+
+  return {
+    ok: true,
+    domain,
+    theme,
+    shopifyThemeRaw: rawTheme,
+    apps,
+    appDetectionResult: appsResult,
+    emails,
+    source: 'page_context',
+  }
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 export type PopupStoreBundle = {
@@ -309,6 +629,7 @@ export type PopupStoreBundle = {
 }
 
 export type FetchAllDataStep =
+  | 'fetching-theme'
   | 'fetching-store'
   | 'fetching-collections'
   | 'fetching-products'
@@ -320,7 +641,8 @@ export type FetchAllDataStep =
  *  1. Resolve domain + read store metadata   → "Fetching store data"
  *  2. Read collections from IndexedDB        → "Fetching collections"
  *  3. Read products from IndexedDB           → "Fetching products"
- *  4. Trigger app detection (content scan)   → "Fetching apps"
+ *
+ * Theme + apps are fetched separately before this via `spykitFetchThemeAndAppsFromHtml`.
  */
 export async function fetchAllData(
   onStep?: (step: FetchAllDataStep) => void,
@@ -374,10 +696,6 @@ export async function fetchAllData(
       /* ignore */
     }
   }
-
-  // ── Step 4: apps (re-fetched on every popup open) ─────────────────────────
-  onStep?.('fetching-apps')
-  emitSpykitToast('Fetching apps')
 
   onStep?.('done')
 
@@ -736,13 +1054,14 @@ async function persistSnapshotToBackground(
   theme: Partial<ShopifyTheme>,
   shopifyThemeRaw: Record<string, unknown> | null,
   apps: ShopifyApp[],
+  appDetectionResult?: Record<string, unknown> | null,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
         type: 'SPYKIT_STORE_SNAPSHOT_FROM_POPUP',
         from: 'popup',
-        payload: { domain, theme, shopifyThemeRaw, apps },
+        payload: { domain, theme, shopifyThemeRaw, apps, appDetectionResult },
       } satisfies ExtMessage,
       () => {
         const le = chrome.runtime.lastError
@@ -760,6 +1079,8 @@ export type SpykitDebugAllResponse =
       theme: Partial<ShopifyTheme>
       shopifyThemeRaw: Record<string, unknown> | null | undefined
       apps: ShopifyApp[]
+      appDetectionResult?: Record<string, unknown> | null
+      emails?: string[]
       source: 'page_context' | 'main_world_fallback'
     }
   | { ok: false; error: string }
@@ -1013,5 +1334,106 @@ export async function spykitDebugFetchHtmlFromActiveTab(): Promise<SpykitDebugFe
     console.warn('[SpyKit Popup] debug-fetch-html: sendMessage threw', msg)
     console.warn('[SpyKit Popup] debug-fetch-html: falling back to executeScript (throw path)')
     return await fetchHtmlViaExecuteScript(tabId, primary.url)
+  }
+}
+
+export type SpykitDebugFetchMetaJsonResponse =
+  | { ok: true; meta: ShopMetaJson | null; url: string }
+  | { ok: false; error: string }
+
+/**
+ * Fetches `{origin}/meta.json` from the active storefront tab (via executeScript
+ * so CORS is not an issue), persists to the background cache via `SHOP_META`,
+ * and returns the parsed payload for immediate Zustand hydration.
+ *
+ * Called in `runLoad()` step 3 so store intelligence and stat boxes populate
+ * before the slower IDB/catalog fetch begins.
+ */
+export async function spykitFetchAndPersistMetaJson(): Promise<SpykitDebugFetchMetaJsonResponse> {
+  const result = await spykitDebugFetchMetaJsonFromActiveTab()
+  if (!result.ok || !result.meta) return result
+
+  // Derive domain from the meta.json URL.
+  let domain: string
+  try {
+    domain = normalizeStoreDomainKey(new URL(result.url).hostname)
+  } catch {
+    domain = normalizeStoreDomainKey(result.url)
+  }
+
+  // Persist to background → chrome.storage so the rest of the pipeline sees it.
+  try {
+    await new Promise<void>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: 'SHOP_META',
+          from: 'content',
+          payload: { domain, shopMeta: result.meta! },
+        } satisfies ExtMessage,
+        () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message))
+          else resolve()
+        },
+      )
+    })
+  } catch (e) {
+    console.warn('[SpyKit Popup] spykitFetchAndPersistMetaJson: SHOP_META persist failed', e)
+  }
+
+  return result
+}
+
+/**
+ * Debug-only helper: fetches `{origin}/meta.json` from the active storefront tab
+ * by executing in-tab context, then returns parsed JSON to the popup for logging.
+ */
+export async function spykitDebugFetchMetaJsonFromActiveTab(): Promise<SpykitDebugFetchMetaJsonResponse> {
+  const primary = await getLastFocusedHttpTab()
+  if (!primary?.id || !primary.url) return { ok: false, error: 'no_active_tab' }
+  try {
+    const u = new URL(primary.url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { ok: false, error: 'unsupported_tab_url' }
+    }
+  } catch {
+    return { ok: false, error: 'bad_tab_url' }
+  }
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: primary.id },
+      world: 'ISOLATED',
+      func: async () => {
+        const metaUrl = `${location.origin}/meta.json`
+        try {
+          const res = await fetch(metaUrl, { credentials: 'omit', cache: 'no-store' })
+          if (!res.ok) {
+            return { ok: false as const, error: `meta_http_${res.status}`, url: metaUrl }
+          }
+          const data = (await res.json()) as unknown
+          return { ok: true as const, meta: data, url: metaUrl }
+        } catch (e) {
+          return {
+            ok: false as const,
+            error: e instanceof Error ? e.message : String(e),
+            url: metaUrl,
+          }
+        }
+      },
+    })
+    const out = results[0]?.result as
+      | { ok?: boolean; meta?: unknown; error?: unknown; url?: unknown }
+      | undefined
+    if (!out || out.ok !== true) {
+      const err = out?.error != null ? String(out.error) : 'unknown_error'
+      return { ok: false, error: err }
+    }
+    return {
+      ok: true,
+      meta: (out.meta as ShopMetaJson | null | undefined) ?? null,
+      url: typeof out.url === 'string' ? out.url : `${new URL(primary.url).origin}/meta.json`,
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }

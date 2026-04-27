@@ -181,6 +181,8 @@ export interface SpyKitStoreData {
   /** Normalized theme for UI (`StoreInfo.theme`) */
   themeNormalized: ShopifyTheme | null
   apps: ShopifyApp[]
+  /** Full detector payload from HTML parser (`detectAppsFromHtmlString`) */
+  appDetectionResult?: Record<string, unknown> | null
   domain: string
   productCount: number
   collectionCount: number
@@ -209,7 +211,8 @@ export interface StoreInfo {
   /** Merchant display name from `shopMeta.name` only (set in background). */
   storeName?: string
   theme: ShopifyTheme | null
-  apps: ShopifyApp[]
+  /** Full detector payload from HTML parser (`detectAppsFromHtmlString`) */
+  appDetectionResult?: Record<string, unknown> | null
   productCount: number
   collectionCount: number
   detectedAt: number
@@ -250,6 +253,8 @@ export interface StoreCacheMeta {
   shopMeta?: ShopMetaJson | null
   storeContacts?: StoreContacts
   apps: ShopifyApp[]
+  /** Full detector payload from HTML parser (`detectAppsFromHtmlString`) */
+  appDetectionResult?: Record<string, unknown> | null
   productCount: number
   collectionCount: number
   catalogLoading?: boolean
@@ -438,6 +443,7 @@ export interface MsgSpykitStoreSnapshotFromPopup {
     theme: Partial<ShopifyTheme>
     shopifyThemeRaw: Record<string, unknown> | null
     apps: ShopifyApp[]
+    appDetectionResult?: Record<string, unknown> | null
   }
 }
 
