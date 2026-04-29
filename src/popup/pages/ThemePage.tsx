@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { StoreInfo } from '../../types'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
@@ -7,6 +7,8 @@ import {
   type ThemeJsonEntry,
   type ThemeJsonReviews,
 } from '../lib/themeJsonCatalog'
+import { getSupabaseThemeMatches } from '../lib/supabaseThemeStores'
+import { InlineSpinner } from '../components/InlineSpinner'
 import {
   ArrowUpRight,
   FileText,
@@ -15,6 +17,7 @@ import {
   ShoppingBag,
   Smartphone,
   Star,
+  TrendingUp,
   User,
   Users,
 } from 'lucide-react'
@@ -58,12 +61,19 @@ function ThemeDollarIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-
 export default function ThemePage({ storeInfo }: ThemePageProps) {
   const t = getResolvedThemeForUI(storeInfo)
   const displayName = t?.name ?? '—'
   const [themeListEntry, setThemeListEntry] = useState<ThemeJsonEntry | null>(null)
   const [catalogLookupDone, setCatalogLookupDone] = useState(false)
+  const [themePeersLoading, setThemePeersLoading] = useState(false)
+  const [themePeersCount, setThemePeersCount] = useState<number | null>(null)
+
+  const resolvedThemeName = useMemo(() => {
+    const n = t?.name?.trim()
+    return n && n !== '—' && n.toLowerCase() !== 'unknown' ? n : null
+  }, [t?.name])
+  const resolvedThemeVersion = (t?.version ?? '').trim()
 
   useEffect(() => {
     const ac = new AbortController()
@@ -91,6 +101,31 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
       ac.abort()
     }
   }, [storeInfo])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!storeInfo || !resolvedThemeName) {
+      setThemePeersCount(null)
+      setThemePeersLoading(false)
+      return
+    }
+    setThemePeersLoading(true)
+    void getSupabaseThemeMatches(resolvedThemeName, resolvedThemeVersion)
+      .then((res) => {
+        if (cancelled) return
+        if (!res.ok) {
+          setThemePeersCount(null)
+          return
+        }
+        setThemePeersCount(res.matches.length)
+      })
+      .finally(() => {
+        if (!cancelled) setThemePeersLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [storeInfo, resolvedThemeName, resolvedThemeVersion])
 
   const isCustomTheme = Boolean(t) && catalogLookupDone && !themeListEntry
 
@@ -129,6 +164,22 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
         .join(' · ')
     : '—'
 
+  const shopifyStoreCount =
+    typeof t?.storeCount === 'number' && t.storeCount > 0 ? t.storeCount : null
+  const catalogStoreCount =
+    typeof themeListEntry?.storeCount === 'number' && themeListEntry.storeCount > 0
+      ? themeListEntry.storeCount
+      : null
+
+  const popularityMain =
+    shopifyStoreCount != null
+      ? shopifyStoreCount.toLocaleString()
+      : catalogStoreCount != null
+        ? catalogStoreCount.toLocaleString()
+        : null
+
+  const showTitleLink = Boolean(themeStoreUrl && !isCustomTheme)
+
   return (
     <>
       <div className="theme-layout">
@@ -146,7 +197,15 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
             </span>
           </div>
           <div className="theme-info-header">
-            <h2>{displayName}</h2>
+            <h2>
+              {showTitleLink && themeStoreUrl ? (
+                <a href={themeStoreUrl} target="_blank" rel="noreferrer" className="theme-info-title-link">
+                  {displayName}
+                </a>
+              ) : (
+                displayName
+              )}
+            </h2>
             <p className="flex-center" style={{ color: 'var(--text-main)', fontWeight: 500, marginBottom: 16 }}>
               <ShoppingBag size={16} color="var(--success)" strokeWidth={2} aria-hidden />
               by {creatorName}
@@ -157,19 +216,20 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
                 <> &bull; Renamed: <strong>{renamedValue}</strong></>
               )}
             </p>
-            {!isCustomTheme && (
-              <a
-                href={themeStoreUrl ?? '#'}
-                target="_blank"
-                rel="noreferrer"
-                className="theme-link flex-center"
-                onClick={(e) => {
-                  if (!themeStoreUrl) e.preventDefault()
-                }}
-              >
-                View on Shopify Theme Store
-                <ArrowUpRight size={16} strokeWidth={2} aria-hidden />
-              </a>
+            {resolvedThemeName && (
+              <span className="badge-active">
+                <span className="dot" />
+                {themePeersLoading ? (
+                  <>
+                    Checking how many stores use this theme…
+                    <InlineSpinner size="sm" />
+                  </>
+                ) : themePeersCount != null ? (
+                  `${themePeersCount} stores use this theme`
+                ) : (
+                  'Store count unavailable'
+                )}
+              </span>
             )}
           </div>
         </div>
@@ -237,27 +297,43 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
           </span>
           <small className="meta-value">{themeListEntry?.description ?? fallbackDescription}</small>
         </div>
-        {!isCustomTheme && (
-          <div className="meta-item meta-item-demo">
-            <span className="meta-label">
-              <LifeBuoy size={14} strokeWidth={2} aria-hidden />
-              Demo
-            </span>
+        <div className="meta-item meta-item-demo">
+          <span className="meta-label">
+            <LifeBuoy size={14} strokeWidth={2} aria-hidden />
+            Demo
+          </span>
+          {!isCustomTheme && liveDemoUrl ? (
             <a
-              href={liveDemoUrl ?? '#'}
+              href={liveDemoUrl}
               target="_blank"
               rel="noreferrer"
               className="theme-link flex-center"
               style={{ fontSize: 'var(--text-sm)' }}
-              onClick={(e) => {
-                if (!liveDemoUrl) e.preventDefault()
-              }}
             >
               Live demo
               <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
             </a>
-          </div>
-        )}
+          ) : (
+            <span className="meta-value">—</span>
+          )}
+        </div>
+        <div className="meta-item meta-item-popularity">
+          <span className="meta-label">
+            <TrendingUp size={14} strokeWidth={2} aria-hidden />
+            Popularity
+          </span>
+          <span className="meta-value">
+            {popularityMain != null ? (
+              popularityMain
+            ) : themePeersLoading ? (
+              <InlineSpinner size="sm" />
+            ) : themePeersCount != null ? (
+              themePeersCount.toLocaleString()
+            ) : (
+              '—'
+            )}
+          </span>
+        </div>
       </div>
 
       {(heroImageUrl || themeListEntry?.mobileImage) && (

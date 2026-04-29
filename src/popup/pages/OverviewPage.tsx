@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CatalogProductRow, StoreInfo } from '../../types'
 import type { PageId } from '../components/Nav'
 import {
@@ -25,6 +25,7 @@ import {
 import { emitSpykitSuccess, emitSpykitToast } from '../lib/spykitToastBus'
 import './storesTab.css'
 import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
+import { InlineSpinner } from '../components/InlineSpinner'
 import {
   CountryFlag,
   countryCodeOnlyLabel,
@@ -35,6 +36,8 @@ import { ShipsToFlag } from '../components/ShipsToFlag'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
+import { getSupabaseThemeMatches } from '../lib/supabaseThemeStores'
+import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 import {
   getShopifyThemeFromHtml,
   loadPopupStoreBundle,
@@ -221,6 +224,10 @@ export default function OverviewPage({
   const [shipsToModalOpen, setShipsToModalOpen] = useState(false)
   const [revealAgeRequested, setRevealAgeRequested] = useState(false)
   const [revealAgeBusy, setRevealAgeBusy] = useState(false)
+  const [emailsModalOpen, setEmailsModalOpen] = useState(false)
+  const [themePeersLoading, setThemePeersLoading] = useState(false)
+  const [themePeersCount, setThemePeersCount] = useState<number | null>(null)
+  const [storesLibraryCount, setStoresLibraryCount] = useState<number | null>(null)
   /** Latest time data was pulled from storefront HTTP (meta.json / catalog), not popup read time. */
   const sourceDataUpdatedAt = Math.max(
     storeInfo?.shopMetaSourceFetchedAt ?? 0,
@@ -396,7 +403,13 @@ export default function OverviewPage({
   const connected = Boolean(storeInfo?.detectedAt && storeInfo?.domain)
 
   const storeName    = shopMeta?.name?.trim() || storeInfo?.domain || '—'
-  const logoLetter   = storeName !== '—' ? storeName[0].toUpperCase() : 'S'
+  const uiTheme      = useMemo(() => getResolvedThemeForUI(storeInfo ?? null), [storeInfo])
+  const titleRowHeading = (() => {
+    const n = uiTheme?.name?.trim()
+    if (n && n !== '—' && n.toLowerCase() !== 'unknown') return n
+    return storeName
+  })()
+  const logoLetter   = titleRowHeading !== '—' ? titleRowHeading[0].toUpperCase() : 'S'
   const myshopifyUrl = shopMeta?.myshopify_domain
     ? `https://${shopMeta.myshopify_domain}`
     : storeInfo?.domain ? `https://${storeInfo.domain}` : null
@@ -457,6 +470,8 @@ export default function OverviewPage({
   const emails = contacts?.emails ?? []
   const email = emails[0] ?? null
   const socialEntries = Object.entries(contacts?.social ?? {})
+  const resolvedThemeName = uiTheme?.name?.trim() || null
+  const resolvedThemeVersion = (uiTheme?.version ?? '').trim()
 
   /** Earliest `published_at` from IDB catalog (full product list). */
   const estimatedAge = useMemo(() => {
@@ -510,6 +525,38 @@ export default function OverviewPage({
     setTimeout(() => setCopied(false), 2000)
   }
 
+  useEffect(() => {
+    let cancelled = false
+    if (!connected || !resolvedThemeName) {
+      setThemePeersCount(null)
+      return
+    }
+    console.log('[SpyKit Popup] Theme fetched from store', {
+      themeName: resolvedThemeName,
+      themeVersion: resolvedThemeVersion,
+      domain: storeInfo?.domain ?? null,
+    })
+    setThemePeersLoading(true)
+    void getSupabaseThemeMatches(resolvedThemeName, resolvedThemeVersion)
+      .then((res) => {
+        if (cancelled) return
+        console.log('[SpyKit Popup] Supabase theme match result', res)
+        if (!res.ok) {
+          setThemePeersCount(null)
+          setStoresLibraryCount(null)
+          return
+        }
+        setThemePeersCount(res.matches.length)
+        setStoresLibraryCount(res.totalFetched)
+      })
+      .finally(() => {
+        if (!cancelled) setThemePeersLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, resolvedThemeName, resolvedThemeVersion])
+
   if (storefrontEligibility === 'checking') {
     return <StoreTabSkeleton />
   }
@@ -549,10 +596,19 @@ export default function OverviewPage({
             <div className="store-logo">{logoLetter}</div>
             <div className="store-details">
               <div className="store-title-row">
-                <h2>{storeName}</h2>
+                <h2>{titleRowHeading}</h2>
                 <span className="badge-active">
                   <span className="dot" />
-                  Shopify detected
+                  {themePeersLoading
+                    ? (
+                      <>
+                        Checking theme matches...
+                        <InlineSpinner size="sm" />
+                      </>
+                    )
+                    : themePeersCount != null
+                      ? `${themePeersCount} stores use ${resolvedThemeName ?? 'this theme'}`
+                      : 'Theme matches unavailable'}
                 </span>
               </div>
               <div className="store-links">
@@ -564,14 +620,16 @@ export default function OverviewPage({
                 )}
                 {emails.length > 0 && (
                   <span className="store-email">
-                    {emails.join(', ')}
-                    <button
-                      className={`copy-btn${copied ? ' copied' : ''}`}
-                      title={copied ? 'Copied!' : 'Copy emails'}
-                      onClick={copyEmail}
-                    >
-                      {copied ? <Check size={13} /> : <Copy size={13} />}
-                    </button>
+                    <span className="store-email-reveal-row">
+                      <button
+                        type="button"
+                        className="estimated-age-reveal-btn"
+                        onClick={() => setEmailsModalOpen(true)}
+                      >
+                        View emails
+                      </button>
+                      <span className="badge-pro">PRO</span>
+                    </span>
                   </span>
                 )}
               </div>
@@ -610,7 +668,9 @@ export default function OverviewPage({
               Theme
             </div>
             <div className="stat-value">
-            { storeInfo?.theme?.name ?? '—'}
+            {uiTheme?.name && uiTheme.name !== '—' && uiTheme.name.toLowerCase() !== 'unknown'
+              ? uiTheme.name
+              : '—'}
             </div>
             <div className="stat-link">Details &rsaquo;</div>
           </div>
@@ -858,6 +918,9 @@ export default function OverviewPage({
         <p className="store-debug-hint">
           Runs against the last-focused normal window tab (storefront). Results sync to cache and Zustand; details log here.
         </p>
+        <p className="store-debug-hint">
+          Stores library: {themePeersLoading ? 'loading…' : (storesLibraryCount != null ? `${fmt(storesLibraryCount)} stores` : 'unavailable')}
+        </p>
         <div className="store-debug-actions">
           <button
             type="button"
@@ -915,6 +978,50 @@ export default function OverviewPage({
           </button>
         </div>
       </div>
+
+      {/* Emails — modal (same shell as ships-to / gallery modals) */}
+      {emailsModalOpen && emails.length > 0 && (
+        <div
+          className="apps-gallery-modal-backdrop"
+          onClick={() => setEmailsModalOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="apps-gallery-modal ships-to-all-modal emails-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="spykit-emails-modal-title"
+          >
+            <button
+              type="button"
+              className="apps-gallery-close"
+              onClick={() => setEmailsModalOpen(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <div className="ships-to-all-modal-inner">
+              <p id="spykit-emails-modal-title" className="ships-to-all-modal-title">
+                Emails
+              </p>
+              <ul className="emails-modal-list">
+                {emails.map((e) => (
+                  <li key={e} className="emails-modal-row">
+                    <a className="emails-modal-link" href={`mailto:${e}`}>
+                      {e}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" className="emails-modal-copy-all" onClick={() => copyEmail()}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied' : 'Copy all'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ships To — all-countries modal */}
       {shipsToModalOpen && shipsTo.length > 0 && (

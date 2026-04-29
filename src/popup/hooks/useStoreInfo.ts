@@ -32,7 +32,7 @@ export type StorefrontEligibility = 'checking' | 'eligible' | 'ineligible'
  * Flow:
  *  1. Check Shopify theme presence on active tab
  *  2. Run content scan (page-world theme + app detection)
- *  3. fetchAllData: store meta → collections → products → apps (with per-step toasts)
+ *  3. fetchAllData: IDB catalog read + optional background sync (quiet toasts until after step 2)
  *  4. Re-run on storeCacheByDomain storage changes
  */
 export function useStoreInfo(): void {
@@ -206,9 +206,12 @@ export function useStoreInfo(): void {
       }
 
       // 4) Continue the canonical pipeline (IDB catalog + final cache bundle).
-      const bundle = await fetchAllData((step) => {
-        if (!cancelled) setFetchStep(step)
-      })
+      const bundle = await fetchAllData(
+        (step) => {
+          if (!cancelled) setFetchStep(step)
+        },
+        { quiet: true },
+      )
 
       if (cancelled) return
 

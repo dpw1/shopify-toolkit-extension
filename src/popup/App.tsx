@@ -8,6 +8,7 @@ import { useStoreInfo } from './hooks/useStoreInfo'
 import { useSpykitStore } from './store/useSpykitStore'
 import OverviewPage from './pages/OverviewPage'
 import ThemePage from './pages/ThemePage'
+import ComparePage from './pages/ComparePage'
 import AppsPage from './pages/AppsPage'
 import ScraperPage from './pages/ScraperPage'
 import DownloadsPage from './pages/DownloadsPage'
@@ -254,6 +255,9 @@ export default function App() {
         <div className={`view${settings.activeTab === 'theme' ? ' active' : ''}`}>
           <ThemePage storeInfo={storeInfo} />
         </div>
+        <div className={`view${settings.activeTab === 'compare' ? ' active' : ''}`}>
+          <ComparePage />
+        </div>
         <div className={`view${settings.activeTab === 'apps' ? ' active' : ''}`}>
           <AppsPage
             storeInfo={storeInfo}
@@ -270,6 +274,7 @@ export default function App() {
               storeInfo={storeInfo}
               products={products}
               collections={collections}
+              isActive={settings.activeTab === 'scraper'}
               initialView={settings.scraperView}
               initialPage={settings.scraperPage}
               initialSearch={settings.scraperSearch}

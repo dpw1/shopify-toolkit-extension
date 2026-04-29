@@ -27,6 +27,8 @@ export type ThemeJsonEntry = {
   themeName?: string
   themePrice?: string
   img?: string
+  /** Theme Store style install / sales count when present in catalog JSON */
+  storeCount?: number
 }
 
 function normKey(v: string): string {

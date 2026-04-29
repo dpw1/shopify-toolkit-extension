@@ -268,7 +268,7 @@ export interface StoreCacheMeta {
   catalogSourceFetchedAt?: number
 }
 
-export type PopupPageId = 'store' | 'theme' | 'apps' | 'scraper' | 'downloads' | 'export'
+export type PopupPageId = 'store' | 'theme' | 'compare' | 'apps' | 'scraper' | 'downloads' | 'export'
 
 export interface PopupStoreScopedState {
   activeTab: PopupPageId

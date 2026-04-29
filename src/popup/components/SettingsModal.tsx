@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { emitSpykitToast } from '../lib/spykitToastBus'
 import { requestFullStoreRefreshFromPopup } from '../lib/popupStoreLoader'
+import { refetchSupabaseStoresLibrary } from '../lib/supabaseThemeStores'
 
 type Props = {
   open: boolean
@@ -11,6 +12,8 @@ type Props = {
 }
 
 export default function SettingsModal({ open, onClose, storeDomainHint }: Props) {
+  const [busy, setBusy] = useState(false)
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -25,6 +28,7 @@ export default function SettingsModal({ open, onClose, storeDomainHint }: Props)
   const modalHost = typeof document !== 'undefined' ? document.getElementById('spykit-modal-root') : null
 
   async function handleFetchData() {
+    setBusy(true)
     emitSpykitToast('Refreshing this store — clearing cache and re-fetching…')
     try {
       const res = await requestFullStoreRefreshFromPopup()
@@ -37,6 +41,24 @@ export default function SettingsModal({ open, onClose, storeDomainHint }: Props)
     } catch (e) {
       emitSpykitToast(`Refresh failed: ${String(e)}`)
     }
+    setBusy(false)
+    onClose()
+  }
+
+  async function handleRefetchStoresLibrary() {
+    setBusy(true)
+    emitSpykitToast('Re-fetching stores library…')
+    try {
+      const res = await refetchSupabaseStoresLibrary(null)
+      if (!res.ok) {
+        emitSpykitToast(`Stores library re-fetch failed: ${res.error}`)
+      } else {
+        emitSpykitToast(`Stores library updated (${res.totalFetched.toLocaleString()} rows).`)
+      }
+    } catch (e) {
+      emitSpykitToast(`Stores library re-fetch failed: ${String(e)}`)
+    }
+    setBusy(false)
     onClose()
   }
 
@@ -63,10 +85,23 @@ export default function SettingsModal({ open, onClose, storeDomainHint }: Props)
           {storeDomainHint ? <span className="spykit-settings-domain"> ({storeDomainHint})</span> : null}
         </p>
         <div className="spykit-settings-actions">
-          <button type="button" className="spykit-settings-fetch" onClick={() => void handleFetchData()}>
+          <button
+            type="button"
+            className="spykit-settings-fetch"
+            disabled={busy}
+            onClick={() => void handleFetchData()}
+          >
             Fetch data
           </button>
-          <button type="button" className="spykit-settings-close" onClick={onClose}>
+          <button
+            type="button"
+            className="spykit-settings-refetch-library"
+            disabled={busy}
+            onClick={() => void handleRefetchStoresLibrary()}
+          >
+            Re-fetch stores library
+          </button>
+          <button type="button" className="spykit-settings-close" disabled={busy} onClick={onClose}>
             Close
           </button>
         </div>

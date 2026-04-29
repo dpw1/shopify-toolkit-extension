@@ -1,5 +1,5 @@
 import { countryCodeOnlyLabel, countryToFlagCode } from './CountryFlag'
-import { getShipFlagAssetUrl } from '../lib/shipFlagUrls'
+import { getFlagCdnUrl, getShipFlagAssetUrl } from '../lib/shipFlagUrls'
 
 type ShipsToFlagProps = {
   country: string
@@ -18,11 +18,15 @@ export function ShipsToFlag({ country, className = '', title }: ShipsToFlagProps
     )
   }
   const t = title ?? countryCodeOnlyLabel(country)
-  const src = getShipFlagAssetUrl(code)
+  const src = getShipFlagAssetUrl(code) ?? getFlagCdnUrl(code)
   if (src) {
     return (
       <img
         src={src}
+        onError={(e) => {
+          const next = getFlagCdnUrl(code)
+          if (e.currentTarget.src !== next) e.currentTarget.src = next
+        }}
         className={`stores-tab-ship-flag-img ${className}`.trim()}
         alt=""
         title={t}

@@ -340,6 +340,8 @@ type Props = {
   /** Catalog rows from IndexedDB — set as first-class state in useStoreInfo. */
   products: CatalogProductRow[]
   collections: CatalogCollectionRow[]
+  /** False when another main nav tab is selected — delays/cancels saved-page restore and `goToPage`. */
+  isActive?: boolean
   initialView?: 'products' | 'collections'
   initialPage?: number
   initialSearch?: string
@@ -364,6 +366,7 @@ export default function ScraperPage({
   storeInfo,
   products: storeProducts,
   collections: storeCollections,
+  isActive = true,
   initialView = 'products',
   initialPage = 1,
   initialSearch = '',
@@ -448,7 +451,17 @@ export default function ScraperPage({
     () => buildPageList(collectionsCurrentPage, collectionsTotalPages),
     [collectionsCurrentPage, collectionsTotalPages],
   )
+  const isActiveRef = useRef(isActive)
+  const mainViewRef = useRef(mainView)
+  useEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
+  useEffect(() => {
+    mainViewRef.current = mainView
+  }, [mainView])
+
   function goToPage(targetPage: number) {
+    if (!isActiveRef.current || mainViewRef.current !== 'products') return
     const maxPages = mainView === 'products' ? totalPages : collectionsTotalPages
     const next = Math.min(Math.max(1, targetPage), Math.max(1, maxPages))
     setPage(next)
@@ -471,10 +484,12 @@ export default function ScraperPage({
   useEffect(() => { goToPageRef.current = goToPage })
 
   const didMountRef = useRef(false)
-  const restoreDoneRef = useRef(false)
+  /** True once catalog has a definitive ready state (same gate as restore scheduling). */
+  const catalogHydratedRef = useRef(false)
+  /** True only after delayed restore actually ran `goToPage` while scraper + products sub-tab were active. */
+  const restoreAppliedRef = useRef(false)
   const desiredInitialPageRef = useRef(Math.max(1, initialPage))
-  // Holds the restore timer so we can cancel it only on unmount (not on dep changes).
-  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     // Keep restored page on first render; only reset on later filter/view changes.
@@ -485,25 +500,45 @@ export default function ScraperPage({
     setPage(1)
   }, [search, stockFilter, vendorFilters, typeFilters, catalogFilters, perPage, mainView])
 
+  // Cancel pending saved-page restore when user leaves the scraper tab or the collections sub-tab.
   useEffect(() => {
-    // Wait for data to settle, then jump to the saved page.
-    // BUG FIX: do NOT return a cleanup fn here — catalogLoading flipping true→false would
-    // cancel the timer via cleanup before the new effect run returns early on restoreDoneRef.
-    if (restoreDoneRef.current) return
+    if (isActive && mainView === 'products') return
+    if (pendingRestoreTimerRef.current != null) {
+      clearTimeout(pendingRestoreTimerRef.current)
+      pendingRestoreTimerRef.current = null
+    }
+  }, [isActive, mainView])
+
+  useEffect(() => {
     const catalogReady = storeProducts.length > 0 || storeInfo?.catalogLoading === false
+    if (catalogReady) catalogHydratedRef.current = true
+
+    if (restoreAppliedRef.current) return
     if (!catalogReady) return
-    restoreDoneRef.current = true
-    restoreTimerRef.current = setTimeout(() => {
+    if (!isActive || mainView !== 'products') return
+
+    if (pendingRestoreTimerRef.current != null) {
+      clearTimeout(pendingRestoreTimerRef.current)
+      pendingRestoreTimerRef.current = null
+    }
+    pendingRestoreTimerRef.current = setTimeout(() => {
+      pendingRestoreTimerRef.current = null
+      if (!isActiveRef.current || mainViewRef.current !== 'products') return
       const target = desiredInitialPageRef.current
       goToPageRef.current(target)
+      restoreAppliedRef.current = true
     }, 250)
-    // No cleanup here on purpose — see comment above.
-  }, [storeProducts.length, storeInfo?.catalogLoading, totalPages])
+  }, [storeProducts.length, storeInfo?.catalogLoading, totalPages, isActive, mainView])
 
-  // Cancel restore timer only when the component actually unmounts.
-  useEffect(() => () => {
-    if (restoreTimerRef.current != null) clearTimeout(restoreTimerRef.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (pendingRestoreTimerRef.current != null) {
+        clearTimeout(pendingRestoreTimerRef.current)
+        pendingRestoreTimerRef.current = null
+      }
+    },
+    [],
+  )
 
   const persistCbRef = useRef(onPersistViewState)
   useEffect(() => {
@@ -511,7 +546,7 @@ export default function ScraperPage({
   }, [onPersistViewState])
 
   useEffect(() => {
-    if (!restoreDoneRef.current) return
+    if (!catalogHydratedRef.current) return
     persistCbRef.current?.({
       view: mainView,
       page: mainView === 'products' ? currentPage : collectionsCurrentPage,

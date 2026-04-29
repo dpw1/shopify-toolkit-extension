@@ -781,8 +781,13 @@ export type FetchAllDataStep =
   | 'fetching-apps'
   | 'done'
 
+export type FetchAllDataOptions = {
+  /** When true, skip per-step toasts (used after theme/apps/meta are already shown). */
+  quiet?: boolean
+}
+
 /**
- * Step-by-step popup data load with per-step toast notifications:
+ * Step-by-step popup data load with optional per-step toast notifications:
  *  1. Resolve domain + read store metadata   → "Fetching store data"
  *  2. Read collections from IndexedDB        → "Fetching collections"
  *  3. Read products from IndexedDB           → "Fetching products"
@@ -791,10 +796,16 @@ export type FetchAllDataStep =
  */
 export async function fetchAllData(
   onStep?: (step: FetchAllDataStep) => void,
+  options?: FetchAllDataOptions,
 ): Promise<PopupStoreBundle | null> {
+  const quiet = options?.quiet === true
+  const toast = (msg: string) => {
+    if (!quiet) emitSpykitToast(msg)
+  }
+
   // ── Step 1: store metadata ────────────────────────────────────────────────
   onStep?.('fetching-store')
-  emitSpykitToast('Fetching store data')
+  toast('Fetching store data')
 
   const hint = await resolveActiveTabShopDomain()
   if (!hint) return null
@@ -805,7 +816,7 @@ export async function fetchAllData(
   // ── Step 2: collections ───────────────────────────────────────────────────
   onStep?.('fetching-collections')
   const expectedCollections = slim?.shopMeta?.published_collections_count
-  emitSpykitToast(
+  toast(
     typeof expectedCollections === 'number'
       ? `Fetching ${expectedCollections.toLocaleString()} collections`
       : 'Fetching collections',
@@ -816,7 +827,7 @@ export async function fetchAllData(
   // ── Step 3: products ──────────────────────────────────────────────────────
   onStep?.('fetching-products')
   const expectedProducts = slim?.shopMeta?.published_products_count
-  emitSpykitToast(
+  toast(
     typeof expectedProducts === 'number'
       ? `Fetching ${expectedProducts.toLocaleString()} products`
       : 'Fetching products',
@@ -846,6 +857,9 @@ export async function fetchAllData(
 
   if (needsCatalogSync) {
     try {
+      if (!quiet) {
+        emitSpykitToast('Syncing product and collection catalog…')
+      }
       chrome.runtime.sendMessage({ type: 'SYNC_CATALOG_ON_POPUP', from: 'popup' } satisfies ExtMessage)
     } catch {
       /* ignore */

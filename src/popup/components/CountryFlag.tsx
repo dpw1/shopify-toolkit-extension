@@ -1,5 +1,5 @@
 import { countries as supportedCountries } from 'country-flag-icons'
-import { getFlagAssetUrl } from '../lib/shipFlagUrls'
+import { getFlagAssetUrl, getFlagCdnUrl } from '../lib/shipFlagUrls'
 
 /** English / Shopify-style aliases → ISO 3166-1 alpha-2 `code` (lowercase). */
 const EXTRA_ALIASES: Record<string, string> = {
@@ -236,11 +236,15 @@ type CountryFlagProps = {
 export function CountryFlag({ country, square = false, className = '', title }: CountryFlagProps) {
   const code = countryToFlagCode(country)
   if (!code) return null
-  const src = getFlagAssetUrl(code, square)
+  const src = getFlagAssetUrl(code, square) ?? getFlagCdnUrl(code)
   if (!src) return null
   return (
     <img
       src={src}
+      onError={(e) => {
+        const next = getFlagCdnUrl(code)
+        if (e.currentTarget.src !== next) e.currentTarget.src = next
+      }}
       className={className}
       title={title ?? country}
       alt=""
