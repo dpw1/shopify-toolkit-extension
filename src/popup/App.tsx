@@ -1,19 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Header from './components/Header'
 import Nav, { type PageId } from './components/Nav'
 import Footer from './components/Footer'
 import ToastStack from './components/ToastStack'
 import SettingsModal from './components/SettingsModal'
 import { useStoreInfo } from './hooks/useStoreInfo'
+import { useThemePeerLibrarySync } from './hooks/useThemePeerLibrarySync'
 import { useSpykitStore } from './store/useSpykitStore'
 import OverviewPage from './pages/OverviewPage'
 import ThemePage from './pages/ThemePage'
 import ComparePage from './pages/ComparePage'
 import AppsPage from './pages/AppsPage'
 import ScraperPage from './pages/ScraperPage'
-import DownloadsPage from './pages/DownloadsPage'
 import ExportPage from './pages/ExportPage'
 import type { PopupSettings } from '../types'
+import { getResolvedThemeForUI } from './lib/themeFromStoreInfo'
 import {
   DEFAULT_POPUP_SETTINGS,
   loadPopupSettings,
@@ -31,6 +32,7 @@ export default function App() {
 
   // Kick off the full data load pipeline → writes into Zustand store
   useStoreInfo()
+  useThemePeerLibrarySync()
 
   // Read everything from the Zustand store
   const storeInfo = useSpykitStore((s) => s.storeInfo)
@@ -38,6 +40,15 @@ export default function App() {
   const products = useSpykitStore((s) => s.products)
   const collections = useSpykitStore((s) => s.collections)
   const storefrontEligibility = useSpykitStore((s) => s.storefrontEligibility)
+  const themePeerMatchCount = useSpykitStore((s) => s.themePeerMatchCount)
+  const themePeerTotalLibrary = useSpykitStore((s) => s.themePeerTotalLibrary)
+
+  const compareThemeName = useMemo(() => {
+    const t = getResolvedThemeForUI(storeInfo)
+    const n = t?.name?.trim()
+    if (n && n !== '—' && n.toLowerCase() !== 'unknown') return n
+    return 'this theme'
+  }, [storeInfo])
 
   const tabsEnabled = storefrontEligibility === 'eligible'
   const currentDomain = (storeInfo?.domain ?? '').trim().toLowerCase()
@@ -124,9 +135,10 @@ export default function App() {
     if (scopedDomainAppliedRef.current === currentDomain) return
 
     const scoped = settings.storeUiByDomain?.[currentDomain]
+    // Do not restore `activeTab` from per-domain memory: it races global settings after
+    // `loadPopupSettings()` and causes visible tab flicker (e.g. Apps → Theme → Apps).
     const patch = scoped
       ? {
-          activeTab: scoped.activeTab,
           scrollY: scoped.scrollY,
           appsExpandedAppKey: scoped.appsExpandedAppKey,
           appsScrollY: scoped.appsScrollY,
@@ -140,7 +152,6 @@ export default function App() {
           scraperPerPage: scoped.scraperPerPage,
         }
       : {
-          activeTab: DEFAULT_POPUP_SETTINGS.activeTab,
           scrollY: DEFAULT_POPUP_SETTINGS.scrollY,
           appsExpandedAppKey: DEFAULT_POPUP_SETTINGS.appsExpandedAppKey,
           appsScrollY: DEFAULT_POPUP_SETTINGS.appsScrollY,
@@ -253,10 +264,19 @@ export default function App() {
           />
         </div>
         <div className={`view${settings.activeTab === 'theme' ? ' active' : ''}`}>
-          <ThemePage storeInfo={storeInfo} />
+          <ThemePage
+            storeInfo={storeInfo}
+            onOpenCompare={() => {
+              updateSettings({ activeTab: 'compare' })
+            }}
+          />
         </div>
         <div className={`view${settings.activeTab === 'compare' ? ' active' : ''}`}>
-          <ComparePage />
+          <ComparePage
+            themeName={compareThemeName}
+            themeStoreCount={themePeerMatchCount ?? 0}
+            totalDatasetCount={themePeerTotalLibrary ?? 0}
+          />
         </div>
         <div className={`view${settings.activeTab === 'apps' ? ' active' : ''}`}>
           <AppsPage
@@ -286,9 +306,6 @@ export default function App() {
             onPersistViewState={handlePersistScraperViewState}
             />
           )}
-        </div>
-        <div className={`view${settings.activeTab === 'downloads' ? ' active' : ''}`}>
-          <DownloadsPage />
         </div>
         <div className={`view${settings.activeTab === 'export' ? ' active' : ''}`}>
           <ExportPage />

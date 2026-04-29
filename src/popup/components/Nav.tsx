@@ -1,6 +1,5 @@
 import type { KeyboardEvent } from 'react'
 import {
-  Download,
   FileOutput,
   GitCompareArrows,
   Grid2x2,
@@ -15,7 +14,6 @@ export type PageId =
   | 'compare'
   | 'apps'
   | 'scraper'
-  | 'downloads'
   | 'export'
 
 interface NavProps {
@@ -28,11 +26,10 @@ interface NavProps {
 const navItems: Array<{ id: PageId; label: string; Icon: typeof Home }> = [
   { id: 'store', label: 'Store', Icon: Home },
   { id: 'theme', label: 'Theme', Icon: Palette },
-  { id: 'compare', label: 'Compare', Icon: GitCompareArrows },
   { id: 'apps', label: 'Apps', Icon: Grid2x2 },
   { id: 'scraper', label: 'Products', Icon: Package },
-  { id: 'downloads', label: 'Downloads', Icon: Download },
   { id: 'export', label: 'Export', Icon: FileOutput },
+  { id: 'compare', label: 'Compare', Icon: GitCompareArrows },
 ]
 
 export default function Nav({ activePage, onNavigate, tabsEnabled = true }: NavProps) {

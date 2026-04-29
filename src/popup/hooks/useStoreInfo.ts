@@ -4,6 +4,7 @@ import {
   checkActiveTabHasShopifyTheme,
   fetchAllData,
   loadPopupStoreBundle,
+  resolveActiveTabShopDomain,
   spykitFetchThemeAndAppsFromHtml,
   spykitFetchAndPersistMetaJson,
   type SpykitDebugAllResponse,
@@ -23,6 +24,7 @@ function bundleHasThemeRow(bundle: PopupStoreBundle | null): boolean {
 }
 
 export type StorefrontEligibility = 'checking' | 'eligible' | 'ineligible'
+const SESSION_CACHE_TTL_MS = 5 * 60 * 1000
 
 /**
  * Orchestrates the popup data load using the centralized fetchAllData pipeline.
@@ -50,6 +52,33 @@ export function useStoreInfo(): void {
 
   useEffect(() => {
     let cancelled = false
+    const sessionKey = (domain: string) => `spykit_popup_load_${domain.trim().toLowerCase()}`
+    async function readFreshSession(domain: string): Promise<{ cachedAt: number } | null> {
+      try {
+        const key = sessionKey(domain)
+        const out = await chrome.storage.session.get([key])
+        const raw = out[key] as { cachedAt?: number } | undefined
+        if (!raw || typeof raw.cachedAt !== 'number') return null
+        if (Date.now() - raw.cachedAt >= SESSION_CACHE_TTL_MS) return null
+        return { cachedAt: raw.cachedAt }
+      } catch {
+        return null
+      }
+    }
+    async function writeSession(domain: string): Promise<void> {
+      try {
+        await chrome.storage.session.set({ [sessionKey(domain)]: { cachedAt: Date.now() } })
+      } catch {
+        /* ignore */
+      }
+    }
+    async function clearSession(domain: string): Promise<void> {
+      try {
+        await chrome.storage.session.remove([sessionKey(domain)])
+      } catch {
+        /* ignore */
+      }
+    }
 
     async function applyBundle(bundle: Awaited<ReturnType<typeof loadPopupStoreBundle>>) {
       const current = useSpykitStore.getState().storeInfo
@@ -181,6 +210,38 @@ export function useStoreInfo(): void {
       // Eligible storefront tab: proceed with the full load sequence.
       eligibleRef.current = true
       setStorefrontEligibility('eligible')
+      const activeDomain = await resolveActiveTabShopDomain()
+      if (cancelled) return
+      if (activeDomain) {
+        const fresh = await readFreshSession(activeDomain)
+        if (cancelled) return
+        if (fresh) {
+          const cachedBundle = await loadPopupStoreBundle()
+          if (cancelled) return
+          const cachedAppsCount = Object.keys(
+            ((cachedBundle?.storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)?.apps ?? {}) as
+              Record<string, unknown>,
+          ).length
+          const cacheHasTheme = bundleHasThemeRow(cachedBundle)
+          const cacheHasApps = cachedAppsCount > 0
+          if (cachedBundle && cacheHasTheme && cacheHasApps) {
+            console.log('[SpyKit Popup] useStoreInfo: session cache hit', {
+              domain: activeDomain,
+              ageMs: Date.now() - fresh.cachedAt,
+            })
+            await applyBundle(cachedBundle)
+            setStoreInfoLoaded(true)
+            setLastFetchedAt(fresh.cachedAt)
+            setFetchStep('done')
+            return
+          }
+          console.log('[SpyKit Popup] useStoreInfo: session cache bypass (missing theme/apps)', {
+            domain: activeDomain,
+            cacheHasTheme,
+            cacheHasApps,
+          })
+        }
+      }
 
       // 2) Fetch theme + apps first from full HTML.
       // This gives the UI an immediate, reliable snapshot before slower fetches.
@@ -233,6 +294,9 @@ export function useStoreInfo(): void {
       if (!cancelled) {
         setLastFetchedAt(Date.now())
         setFetchStep('done')
+        if (activeDomain) {
+          void writeSession(activeDomain)
+        }
         console.log('[SpyKit Popup] useStoreInfo: runLoad complete')
       }
     }
@@ -267,6 +331,10 @@ export function useStoreInfo(): void {
           return
         }
         console.log('[SpyKit Popup] spykitLoadStore: start (re-fetch HTML → theme+apps → meta)')
+        const activeDomain = await resolveActiveTabShopDomain()
+        if (activeDomain) {
+          await clearSession(activeDomain)
+        }
 
         setFetchStep('fetching-theme')
         const scanRes = await spykitFetchThemeAndAppsFromHtml()
@@ -289,6 +357,9 @@ export function useStoreInfo(): void {
           await applyBundle(finalBundle)
           setLastFetchedAt(Date.now())
           setFetchStep('done')
+          if (activeDomain) {
+            void writeSession(activeDomain)
+          }
           console.log('[SpyKit Popup] spykitLoadStore: applied to Zustand / window.storeData')
         } else {
           console.warn('[SpyKit Popup] spykitLoadStore: fetchAllData returned null')

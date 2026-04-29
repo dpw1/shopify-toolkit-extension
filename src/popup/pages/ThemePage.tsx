@@ -7,8 +7,8 @@ import {
   type ThemeJsonEntry,
   type ThemeJsonReviews,
 } from '../lib/themeJsonCatalog'
-import { getSupabaseThemeMatches } from '../lib/supabaseThemeStores'
 import { InlineSpinner } from '../components/InlineSpinner'
+import { useSpykitStore } from '../store/useSpykitStore'
 import {
   ArrowUpRight,
   FileText,
@@ -24,6 +24,7 @@ import {
 
 interface ThemePageProps {
   storeInfo: StoreInfo | null
+  onOpenCompare?: () => void
 }
 
 /**
@@ -61,19 +62,19 @@ function ThemeDollarIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-export default function ThemePage({ storeInfo }: ThemePageProps) {
+export default function ThemePage({ storeInfo, onOpenCompare }: ThemePageProps) {
   const t = getResolvedThemeForUI(storeInfo)
   const displayName = t?.name ?? '—'
   const [themeListEntry, setThemeListEntry] = useState<ThemeJsonEntry | null>(null)
   const [catalogLookupDone, setCatalogLookupDone] = useState(false)
-  const [themePeersLoading, setThemePeersLoading] = useState(false)
-  const [themePeersCount, setThemePeersCount] = useState<number | null>(null)
+  const themePeersLoading = useSpykitStore((s) => s.themePeersLoading)
+  const themePeersCount = useSpykitStore((s) => s.themePeerMatchCount)
+  const storesLibraryCount = useSpykitStore((s) => s.themePeerTotalLibrary)
 
   const resolvedThemeName = useMemo(() => {
     const n = t?.name?.trim()
     return n && n !== '—' && n.toLowerCase() !== 'unknown' ? n : null
   }, [t?.name])
-  const resolvedThemeVersion = (t?.version ?? '').trim()
 
   useEffect(() => {
     const ac = new AbortController()
@@ -101,31 +102,6 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
       ac.abort()
     }
   }, [storeInfo])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!storeInfo || !resolvedThemeName) {
-      setThemePeersCount(null)
-      setThemePeersLoading(false)
-      return
-    }
-    setThemePeersLoading(true)
-    void getSupabaseThemeMatches(resolvedThemeName, resolvedThemeVersion)
-      .then((res) => {
-        if (cancelled) return
-        if (!res.ok) {
-          setThemePeersCount(null)
-          return
-        }
-        setThemePeersCount(res.matches.length)
-      })
-      .finally(() => {
-        if (!cancelled) setThemePeersLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [storeInfo, resolvedThemeName, resolvedThemeVersion])
 
   const isCustomTheme = Boolean(t) && catalogLookupDone && !themeListEntry
 
@@ -217,19 +193,28 @@ export default function ThemePage({ storeInfo }: ThemePageProps) {
               )}
             </p>
             {resolvedThemeName && (
-              <span className="badge-active">
+              <button
+                type="button"
+                className="badge-active badge-active--clickable"
+                aria-label="See how this store compares to others using this theme"
+                data-microtip-position="top"
+                role="tooltip"
+                onClick={() => onOpenCompare?.()}
+              >
                 <span className="dot" />
                 {themePeersLoading ? (
                   <>
                     Checking how many stores use this theme…
                     <InlineSpinner size="sm" />
                   </>
+                ) : themePeersCount != null && storesLibraryCount != null ? (
+                  `${themePeersCount.toLocaleString()} of ${storesLibraryCount.toLocaleString()} stores use this theme`
                 ) : themePeersCount != null ? (
-                  `${themePeersCount} stores use this theme`
+                  `${themePeersCount.toLocaleString()} stores use this theme`
                 ) : (
                   'Store count unavailable'
                 )}
-              </span>
+              </button>
             )}
           </div>
         </div>

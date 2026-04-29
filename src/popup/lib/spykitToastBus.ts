@@ -17,8 +17,14 @@ function emit(payload: ToastPayload): void {
   for (const h of handlers) h(payload)
 }
 
-export function emitSpykitToast(message: string): void {
-  emit({ message, type: 'info' })
+export type EmitSpykitToastOptions = {
+  /** When true, append ` [stored]` (data read from chrome.storage / IndexedDB, not a fresh network pull). */
+  fromStored?: boolean
+}
+
+export function emitSpykitToast(message: string, options?: EmitSpykitToastOptions): void {
+  const suffix = options?.fromStored ? ' [stored]' : ''
+  emit({ message: message + suffix, type: 'info' })
 }
 
 export function emitSpykitSuccess(message: string): void {

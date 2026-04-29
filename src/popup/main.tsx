@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import 'microtip/microtip.css'
 import './styles/globals.css'
 import App from './App'
 

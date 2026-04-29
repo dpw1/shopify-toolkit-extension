@@ -799,13 +799,13 @@ export async function fetchAllData(
   options?: FetchAllDataOptions,
 ): Promise<PopupStoreBundle | null> {
   const quiet = options?.quiet === true
-  const toast = (msg: string) => {
-    if (!quiet) emitSpykitToast(msg)
+  const toastStored = (msg: string) => {
+    if (!quiet) emitSpykitToast(msg, { fromStored: true })
   }
 
   // ── Step 1: store metadata ────────────────────────────────────────────────
   onStep?.('fetching-store')
-  toast('Fetching store data')
+  toastStored('Fetching store data')
 
   const hint = await resolveActiveTabShopDomain()
   if (!hint) return null
@@ -816,7 +816,7 @@ export async function fetchAllData(
   // ── Step 2: collections ───────────────────────────────────────────────────
   onStep?.('fetching-collections')
   const expectedCollections = slim?.shopMeta?.published_collections_count
-  toast(
+  toastStored(
     typeof expectedCollections === 'number'
       ? `Fetching ${expectedCollections.toLocaleString()} collections`
       : 'Fetching collections',
@@ -827,7 +827,7 @@ export async function fetchAllData(
   // ── Step 3: products ──────────────────────────────────────────────────────
   onStep?.('fetching-products')
   const expectedProducts = slim?.shopMeta?.published_products_count
-  toast(
+  toastStored(
     typeof expectedProducts === 'number'
       ? `Fetching ${expectedProducts.toLocaleString()} products`
       : 'Fetching products',

@@ -27,6 +27,11 @@ interface SpykitState {
   storeInfoLoaded: boolean
   storefrontEligibility: StorefrontEligibility
 
+  /** Theme name matches in SpyKit stores library (Supabase cache) vs total rows scanned. */
+  themePeerMatchCount: number | null
+  themePeerTotalLibrary: number | null
+  themePeersLoading: boolean
+
   // ── Actions ─────────────────────────────────────────────────────────────────
   setStoreInfo: (info: StoreInfo | null) => void
   setProducts: (products: CatalogProductRow[]) => void
@@ -35,6 +40,11 @@ interface SpykitState {
   setFetchStep: (step: FetchStep) => void
   setStoreInfoLoaded: (loaded: boolean) => void
   setStorefrontEligibility: (e: StorefrontEligibility) => void
+  setThemePeerLibrary: (patch: {
+    themePeerMatchCount?: number | null
+    themePeerTotalLibrary?: number | null
+    themePeersLoading?: boolean
+  }) => void
 }
 
 export const useSpykitStore = create<SpykitState>()((set) => ({
@@ -45,6 +55,9 @@ export const useSpykitStore = create<SpykitState>()((set) => ({
   fetchStep: 'idle',
   storeInfoLoaded: false,
   storefrontEligibility: 'checking',
+  themePeerMatchCount: null,
+  themePeerTotalLibrary: null,
+  themePeersLoading: false,
 
   setStoreInfo: (info) => set({ storeInfo: info }),
   setProducts: (products) => set({ products }),
@@ -53,4 +66,13 @@ export const useSpykitStore = create<SpykitState>()((set) => ({
   setFetchStep: (step) => set({ fetchStep: step }),
   setStoreInfoLoaded: (loaded) => set({ storeInfoLoaded: loaded }),
   setStorefrontEligibility: (e) => set({ storefrontEligibility: e }),
+  setThemePeerLibrary: (patch) =>
+    set((s) => ({
+      themePeerMatchCount:
+        patch.themePeerMatchCount !== undefined ? patch.themePeerMatchCount : s.themePeerMatchCount,
+      themePeerTotalLibrary:
+        patch.themePeerTotalLibrary !== undefined ? patch.themePeerTotalLibrary : s.themePeerTotalLibrary,
+      themePeersLoading:
+        patch.themePeersLoading !== undefined ? patch.themePeersLoading : s.themePeersLoading,
+    })),
 }))

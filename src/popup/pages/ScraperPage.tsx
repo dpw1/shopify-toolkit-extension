@@ -461,8 +461,10 @@ export default function ScraperPage({
   }, [mainView])
 
   function goToPage(targetPage: number) {
-    if (!isActiveRef.current || mainViewRef.current !== 'products') return
-    const maxPages = mainView === 'products' ? totalPages : collectionsTotalPages
+    if (!isActiveRef.current) return
+    const view = mainViewRef.current
+    if (view !== 'products' && view !== 'collections') return
+    const maxPages = view === 'products' ? totalPages : collectionsTotalPages
     const next = Math.min(Math.max(1, targetPage), Math.max(1, maxPages))
     setPage(next)
   }

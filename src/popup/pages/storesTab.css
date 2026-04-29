@@ -123,6 +123,14 @@
   flex-shrink: 0;
 }
 
+.stores-tab button.badge-active.badge-active--clickable {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
 .stores-tab .store-links {
   display: flex;
   flex-direction: column;

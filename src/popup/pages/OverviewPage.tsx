@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { CatalogProductRow, StoreInfo } from '../../types'
 import type { PageId } from '../components/Nav'
 import {
@@ -36,7 +36,6 @@ import { ShipsToFlag } from '../components/ShipsToFlag'
 import { appendUtmToUrl } from '../lib/appendUtm'
 import type { StorefrontEligibility } from '../hooks/useStoreInfo'
 import { formatFirstProductPublishedLine, formatStoreAgeSummary } from '../lib/humanStoreAge'
-import { getSupabaseThemeMatches } from '../lib/supabaseThemeStores'
 import { getResolvedThemeForUI } from '../lib/themeFromStoreInfo'
 import {
   getShopifyThemeFromHtml,
@@ -225,9 +224,9 @@ export default function OverviewPage({
   const [revealAgeRequested, setRevealAgeRequested] = useState(false)
   const [revealAgeBusy, setRevealAgeBusy] = useState(false)
   const [emailsModalOpen, setEmailsModalOpen] = useState(false)
-  const [themePeersLoading, setThemePeersLoading] = useState(false)
-  const [themePeersCount, setThemePeersCount] = useState<number | null>(null)
-  const [storesLibraryCount, setStoresLibraryCount] = useState<number | null>(null)
+  const themePeersLoading = useSpykitStore((s) => s.themePeersLoading)
+  const themePeersCount = useSpykitStore((s) => s.themePeerMatchCount)
+  const storesLibraryCount = useSpykitStore((s) => s.themePeerTotalLibrary)
   /** Latest time data was pulled from storefront HTTP (meta.json / catalog), not popup read time. */
   const sourceDataUpdatedAt = Math.max(
     storeInfo?.shopMetaSourceFetchedAt ?? 0,
@@ -470,9 +469,6 @@ export default function OverviewPage({
   const emails = contacts?.emails ?? []
   const email = emails[0] ?? null
   const socialEntries = Object.entries(contacts?.social ?? {})
-  const resolvedThemeName = uiTheme?.name?.trim() || null
-  const resolvedThemeVersion = (uiTheme?.version ?? '').trim()
-
   /** Earliest `published_at` from IDB catalog (full product list). */
   const estimatedAge = useMemo(() => {
     const products = catalogProducts
@@ -525,38 +521,6 @@ export default function OverviewPage({
     setTimeout(() => setCopied(false), 2000)
   }
 
-  useEffect(() => {
-    let cancelled = false
-    if (!connected || !resolvedThemeName) {
-      setThemePeersCount(null)
-      return
-    }
-    console.log('[SpyKit Popup] Theme fetched from store', {
-      themeName: resolvedThemeName,
-      themeVersion: resolvedThemeVersion,
-      domain: storeInfo?.domain ?? null,
-    })
-    setThemePeersLoading(true)
-    void getSupabaseThemeMatches(resolvedThemeName, resolvedThemeVersion)
-      .then((res) => {
-        if (cancelled) return
-        console.log('[SpyKit Popup] Supabase theme match result', res)
-        if (!res.ok) {
-          setThemePeersCount(null)
-          setStoresLibraryCount(null)
-          return
-        }
-        setThemePeersCount(res.matches.length)
-        setStoresLibraryCount(res.totalFetched)
-      })
-      .finally(() => {
-        if (!cancelled) setThemePeersLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [connected, resolvedThemeName, resolvedThemeVersion])
-
   if (storefrontEligibility === 'checking') {
     return <StoreTabSkeleton />
   }
@@ -597,19 +561,28 @@ export default function OverviewPage({
             <div className="store-details">
               <div className="store-title-row">
                 <h2>{titleRowHeading}</h2>
-                <span className="badge-active">
+                <button
+                  type="button"
+                  className="badge-active badge-active--clickable"
+                  aria-label="See how this store compares to others using this theme"
+                  data-microtip-position="bottom"
+                  role="tooltip"
+                  onClick={() => onNavigate('compare')}
+                >
                   <span className="dot" />
                   {themePeersLoading
                     ? (
                       <>
-                        Checking theme matches...
+                        Checking theme matches…
                         <InlineSpinner size="sm" />
                       </>
                     )
-                    : themePeersCount != null
-                      ? `${themePeersCount} stores use ${resolvedThemeName ?? 'this theme'}`
-                      : 'Theme matches unavailable'}
-                </span>
+                    : themePeersCount != null && storesLibraryCount != null
+                      ? `${themePeersCount.toLocaleString()} of ${storesLibraryCount.toLocaleString()} stores use this theme`
+                      : themePeersCount != null
+                        ? `${themePeersCount.toLocaleString()} stores use this theme`
+                        : 'Theme matches unavailable'}
+                </button>
               </div>
               <div className="store-links">
                 {myshopifyUrl && (
