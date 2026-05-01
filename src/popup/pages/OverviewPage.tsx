@@ -12,7 +12,6 @@ import {
   FileText,
   Folder,
   Globe,
-  Mail,
   MapPin,
   Package,
   Palette,
@@ -24,6 +23,7 @@ import {
 } from 'lucide-react'
 import { emitSpykitSuccess, emitSpykitToast } from '../lib/spykitToastBus'
 import './storesTab.css'
+import { BadgePro } from '../components/BadgePro'
 import { PaymentBrandIcon } from '../components/PaymentBrandIcon'
 import { InlineSpinner } from '../components/InlineSpinner'
 import {
@@ -467,7 +467,6 @@ export default function OverviewPage({
   const description = shopMeta?.description?.trim() || null
 
   const emails = contacts?.emails ?? []
-  const email = emails[0] ?? null
   const socialEntries = Object.entries(contacts?.social ?? {})
   /** Earliest `published_at` from IDB catalog (full product list). */
   const estimatedAge = useMemo(() => {
@@ -601,7 +600,7 @@ export default function OverviewPage({
                       >
                         View emails
                       </button>
-                      <span className="badge-pro">PRO</span>
+                      <BadgePro />
                     </span>
                   </span>
                 )}
@@ -800,15 +799,6 @@ export default function OverviewPage({
                   <SocialSvg platform={platform} />
                 </a>
               ))}
-              {email && (
-                <a
-                  className="social-icon"
-                  href={`mailto:${email}`}
-                  title="Email"
-                >
-                  <Mail size={15} />
-                </a>
-              )}
             </div>
           ) : (
             <div className="intel-sub intel-sub--social-empty" style={{ marginTop: 4 }}>Not found yet</div>
@@ -863,7 +853,7 @@ export default function OverviewPage({
               >
                 Reveal
               </button>
-              <span className="badge-pro">PRO</span>
+              <BadgePro />
             </div>
           ) : revealAgeBusy ? (
             <div className="intel-sub intel-sub--estimated-age-empty" style={{ marginTop: 4 }}>loading</div>

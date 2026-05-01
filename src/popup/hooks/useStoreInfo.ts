@@ -243,61 +243,97 @@ export function useStoreInfo(): void {
         }
       }
 
-      // 2) Fetch theme + apps first from full HTML.
-      // This gives the UI an immediate, reliable snapshot before slower fetches.
-      setFetchStep('fetching-theme')
-      const scanRes = await spykitFetchThemeAndAppsFromHtml()
-      console.log('[SpyKit Popup] useStoreInfo: HTML theme+apps done', scanRes)
-      await applyThemeAppsSnapshot(scanRes)
-
-      // 3) Fetch meta.json immediately and hydrate Zustand.
-      // This populates product/collection counts + all Store Intelligence fields
-      // (location, currency, ships-to, description, payments) before the IDB catalog loads.
-      setFetchStep('fetching-store')
-      const metaRes = await spykitFetchAndPersistMetaJson()
-      if (cancelled) return
-      if (metaRes.ok && metaRes.meta) {
-        await applyMetaJson(metaRes.meta)
+      // Decide fetch order based on the tab that was last active (read from persisted storage).
+      // • Products tab (scraper) → catalog data first, then theme/apps HTML scan
+      // • All other tabs (store, theme, apps, …) → theme+apps HTML first (default)
+      let preferCatalog = false
+      try {
+        const stored = await new Promise<Record<string, unknown>>((resolve) => {
+          chrome.storage.local.get(['popupSettings'], (r) => resolve(r as Record<string, unknown>))
+        })
+        const ps = stored.popupSettings as { activeTab?: string } | undefined
+        preferCatalog = ps?.activeTab === 'scraper'
+      } catch {
+        /* ignore — use default fetch order */
       }
-
-      // Store tab is considered "loaded" once theme + apps + meta.json are in.
-      // Catalog products/collections can continue syncing in the background.
-      if (!cancelled) {
-        setStoreInfoLoaded(true)
-      }
-
-      // 4) Continue the canonical pipeline (IDB catalog + final cache bundle).
-      const bundle = await fetchAllData(
-        (step) => {
-          if (!cancelled) setFetchStep(step)
-        },
-        { quiet: true },
-      )
-
       if (cancelled) return
 
-      // 5) Apply merged bundle into Zustand/window.storeData.
-      // Merge logic preserves fresh theme/apps + shopMeta if bundle is temporarily behind.
-      console.log('[SpyKit Popup] useStoreInfo: fetchAllData bundle', {
-        domain: bundle?.domain,
-        hasThemeRow: bundleHasThemeRow(bundle),
-        apps:
-          Object.keys(
+      if (preferCatalog) {
+        // 2a) Meta.json first — gets product/collection counts fast for the products tab.
+        setFetchStep('fetching-store')
+        const metaRes = await spykitFetchAndPersistMetaJson()
+        if (cancelled) return
+        if (metaRes.ok && metaRes.meta) await applyMetaJson(metaRes.meta)
+
+        if (!cancelled) setStoreInfoLoaded(true)
+
+        // 3a) Catalog sync (products.json / IDB).
+        const bundle = await fetchAllData(
+          (step) => { if (!cancelled) setFetchStep(step) },
+          { quiet: true },
+        )
+        if (cancelled) return
+        await applyBundle(bundle)
+
+        // 4a) Theme + apps HTML scan last (non-blocking for products tab UX).
+        setFetchStep('fetching-theme')
+        const scanRes = await spykitFetchThemeAndAppsFromHtml()
+        console.log('[SpyKit Popup] useStoreInfo: HTML theme+apps done (catalog-first path)', scanRes)
+        await applyThemeAppsSnapshot(scanRes)
+
+        if (!cancelled) {
+          setLastFetchedAt(Date.now())
+          setFetchStep('done')
+          if (activeDomain) void writeSession(activeDomain)
+          console.log('[SpyKit Popup] useStoreInfo: runLoad complete (catalog-first)')
+        }
+      } else {
+        // 2b) Fetch theme + apps first from full HTML.
+        // This gives the UI an immediate, reliable snapshot before slower fetches.
+        setFetchStep('fetching-theme')
+        const scanRes = await spykitFetchThemeAndAppsFromHtml()
+        console.log('[SpyKit Popup] useStoreInfo: HTML theme+apps done', scanRes)
+        await applyThemeAppsSnapshot(scanRes)
+
+        // 3b) Fetch meta.json immediately and hydrate Zustand.
+        // This populates product/collection counts + all Store Intelligence fields
+        // (location, currency, ships-to, description, payments) before the IDB catalog loads.
+        setFetchStep('fetching-store')
+        const metaRes = await spykitFetchAndPersistMetaJson()
+        if (cancelled) return
+        if (metaRes.ok && metaRes.meta) await applyMetaJson(metaRes.meta)
+
+        // Store tab is considered "loaded" once theme + apps + meta.json are in.
+        // Catalog products/collections can continue syncing in the background.
+        if (!cancelled) setStoreInfoLoaded(true)
+
+        // 4b) Continue the canonical pipeline (IDB catalog + final cache bundle).
+        const bundle = await fetchAllData(
+          (step) => { if (!cancelled) setFetchStep(step) },
+          { quiet: true },
+        )
+        if (cancelled) return
+
+        // 5b) Apply merged bundle into Zustand/window.storeData.
+        // Merge logic preserves fresh theme/apps + shopMeta if bundle is temporarily behind.
+        console.log('[SpyKit Popup] useStoreInfo: fetchAllData bundle', {
+          domain: bundle?.domain,
+          hasThemeRow: bundleHasThemeRow(bundle),
+          apps: Object.keys(
             ((bundle?.storeInfo?.appDetectionResult as { apps?: Record<string, unknown> } | null)
               ?.apps ?? {}) as Record<string, unknown>,
           ).length,
-        products: bundle?.products?.length ?? 0,
-      })
-      await applyBundle(bundle)
+          products: bundle?.products?.length ?? 0,
+        })
+        await applyBundle(bundle)
 
-      // 6) Mark pipeline complete for UI indicators.
-      if (!cancelled) {
-        setLastFetchedAt(Date.now())
-        setFetchStep('done')
-        if (activeDomain) {
-          void writeSession(activeDomain)
+        // 6b) Mark pipeline complete for UI indicators.
+        if (!cancelled) {
+          setLastFetchedAt(Date.now())
+          setFetchStep('done')
+          if (activeDomain) void writeSession(activeDomain)
+          console.log('[SpyKit Popup] useStoreInfo: runLoad complete')
         }
-        console.log('[SpyKit Popup] useStoreInfo: runLoad complete')
       }
     }
 

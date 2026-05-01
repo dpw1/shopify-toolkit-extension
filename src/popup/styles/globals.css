@@ -658,9 +658,9 @@ select {
   text-align: left;
 }
 
-/* Compare tab */
+/* Compare tab + shared WaitlistSignup panel */
 .compare-page {
-  min-height: 440px;
+  min-height: 420px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -770,6 +770,70 @@ select {
   color: var(--success);
   margin: 0;
   padding: 10px 0;
+}
+
+/* Waitlist input row: input + button side by side */
+.waitlist-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.waitlist-input-row .compare-page__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.waitlist-submit-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-family: var(--font-family);
+  color: var(--primary);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: filter 0.15s;
+  display: inline-flex;
+  align-items: center;
+}
+
+.waitlist-submit-btn:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.waitlist-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Waitlist success state */
+.waitlist-success {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--success);
+  background: var(--success-bg);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  line-height: 1.4;
+}
+
+.waitlist-success strong {
+  font-weight: 600;
+}
+
+/* Waitlist error */
+.waitlist-error {
+  font-size: var(--text-xs);
+  color: #ef4444;
+  margin: 0;
 }
 .theme-link { color: var(--primary); text-decoration: none; font-size: var(--text-sm); font-weight: 500; }
 
@@ -1580,11 +1644,32 @@ select {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
 }
 .footer-left { display: flex; gap: 12px; align-items: center; }
 .shield-icon { color: var(--success); background: var(--success-bg); padding: 8px; border-radius: var(--radius-md); }
 .footer-text p { font-size: var(--text-sm); color: var(--text-muted); }
 .footer-text p:first-child { color: var(--text-main); font-weight: 500; }
+
+.footer-review {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.footer-review-link {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.footer-review-link:hover {
+  color: var(--text-main);
+  text-decoration: underline;
+}
 
 .footer-right { display: flex; align-items: center; gap: 24px; }
 .sync-info { font-size: var(--text-sm); color: var(--text-muted); display: flex; flex-direction: column; gap: 6px;}

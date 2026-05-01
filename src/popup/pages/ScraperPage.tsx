@@ -127,15 +127,6 @@ function toSmallImageUrl(url?: string): string | undefined {
 }
 
 
-function exportRowsJson(filename: string, rows: ProductRow[]) {
-  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
 const IMG_PLACEHOLDER = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5">
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -620,17 +611,7 @@ export default function ScraperPage({
   // Only stop skeletons when loading is explicitly false and we still have no products.
   const showLoadingRows = storeProducts.length === 0 && storeInfo?.catalogLoading !== false
 
-  const catalogWaitToastFired = useRef(false)
-  useEffect(() => {
-    if (!showLoadingRows) {
-      catalogWaitToastFired.current = false
-      return
-    }
-    if (mainView !== 'products') return
-    if (catalogWaitToastFired.current) return
-    catalogWaitToastFired.current = true
-    emitSpykitToast('Fetching products')
-  }, [showLoadingRows, mainView])
+  // No toast for 'Fetching products' — the skeleton rows already communicate loading state
 
   // Delay the "no products" empty message slightly to avoid a 1-frame flash
   // between skeletons disappearing and data rows appearing.
@@ -748,14 +729,11 @@ export default function ScraperPage({
                     </button>
                     <button
                       type="button"
-                      className="pt-btn btn-export"
-                      onClick={() => {
-                        const all = new Map(productRows.map((r) => [r.id, r]))
-                        const sel = [...selected].map((id) => all.get(id)).filter((r): r is ProductRow => r != null)
-                        exportRowsJson(`spykit-products-${Date.now()}.json`, sel)
-                      }}
+                      className="pt-btn btn-export btn-export--soon"
+                      disabled
+                      title="Export is coming soon"
                     >
-                      Export selected <span aria-hidden>→</span>
+                      Coming soon
                     </button>
                   </div>
                 ) : undefined

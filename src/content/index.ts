@@ -315,8 +315,15 @@ function collectStoreContacts(): StoreContacts {
   }
 
   const emailBlacklist = [
-    'sentry.io', 'example.com', 'yourdomain', 'domain.com',
-    'shopify.com', 'cdn.shopify', 'wixpress.com', 'test.com',
+    'sentry.io', 'shopify.com', 'cdn.shopify', 'wixpress.com',
+    // Obviously fake/placeholder domains
+    'example.com', 'example.org', 'example.net',
+    'yourdomain.com', 'yourdomain.org', 'yourdomain',
+    'domain.com', 'test.com', 'test.org', 'test.net',
+    'placeholder.com', 'youremail.com', 'email.com',
+    'sample.com', 'fake.com', 'acme.com', 'company.com',
+    'website.com', 'mail.com', 'noemail.com', 'nomail.com',
+    'demo.com', 'lorem.com', 'ipsum.com',
   ]
   const emailPattern = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
 

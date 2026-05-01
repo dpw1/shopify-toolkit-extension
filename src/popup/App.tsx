@@ -137,6 +137,7 @@ export default function App() {
     const scoped = settings.storeUiByDomain?.[currentDomain]
     // Do not restore `activeTab` from per-domain memory: it races global settings after
     // `loadPopupSettings()` and causes visible tab flicker (e.g. Apps → Theme → Apps).
+    // Exception: brand-new domains always open on the Store tab.
     const patch = scoped
       ? {
           scrollY: scoped.scrollY,
@@ -152,6 +153,8 @@ export default function App() {
           scraperPerPage: scoped.scraperPerPage,
         }
       : {
+          // New URL: always start on the Store tab
+          activeTab: 'store' as const,
           scrollY: DEFAULT_POPUP_SETTINGS.scrollY,
           appsExpandedAppKey: DEFAULT_POPUP_SETTINGS.appsExpandedAppKey,
           appsScrollY: DEFAULT_POPUP_SETTINGS.appsScrollY,

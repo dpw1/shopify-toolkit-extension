@@ -1,4 +1,4 @@
-import { MoreVertical, Settings, Star } from 'lucide-react'
+import { Settings, Star } from 'lucide-react'
 
 interface HeaderProps {
   onOpenSettings?: () => void
@@ -19,9 +19,9 @@ export default function Header({ onOpenSettings }: HeaderProps) {
         <button type="button" aria-label="Settings" onClick={() => onOpenSettings?.()}>
           <Settings size={20} strokeWidth={2} />
         </button>
-        <button type="button" aria-label="More options">
+        {/* <button type="button" aria-label="More options">
           <MoreVertical size={20} strokeWidth={2} />
-        </button>
+        </button> */}
       </div>
     </header>
   )

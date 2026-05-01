@@ -5,6 +5,7 @@ import { subscribeSpykitToast, type ToastPayload, type ToastType } from '../lib/
 
 const VISIBLE_MS = 6000
 const EXIT_MS = 280
+const MAX_TOASTS = 3
 
 type ToastItem = { id: string; message: string; type: ToastType; exiting: boolean }
 
@@ -31,7 +32,9 @@ export default function ToastStack() {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       setItems((prev) => {
         if (prev.some((x) => x.message === message && !x.exiting)) return prev
-        return [...prev, { id, message, type, exiting: false }]
+        const next = [...prev, { id, message, type, exiting: false }]
+        // Keep only the most recent MAX_TOASTS items (drop oldest when over limit)
+        return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next
       })
       const t = window.setTimeout(() => {
         timers.current.delete(id)

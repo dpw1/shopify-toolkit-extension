@@ -1,4 +1,4 @@
-import { Info, ShieldCheck, Star } from 'lucide-react'
+import { ShieldCheck, Star } from 'lucide-react'
 
 export default function Footer() {
   return (
@@ -12,7 +12,18 @@ export default function Footer() {
           <p>Your data stays private.</p>
         </div>
       </div>
-      <div className="footer-right">
+      <div className="footer-review">
+        <Star size={13} strokeWidth={2} style={{ color: '#f59e0b', fill: '#f59e0b', flexShrink: 0 }} aria-hidden />
+        <a
+          href="https://chromewebstore.google.com/detail/shopify-app-detector-by-e/fhkelfkhcaokghlkckfgjoejhanelped/reviews"
+          target="_blank"
+          rel="noreferrer"
+          className="footer-review-link"
+        >
+          Please consider leaving us a 5&#8209;star review. Thanks!
+        </a>
+      </div>
+      {/* <div className="footer-right">
         <div className="sync-info">
           <div className="sync-text">
             100 free syncs left
@@ -26,7 +37,7 @@ export default function Footer() {
           <Star size={16} strokeWidth={2} aria-hidden />
           Upgrade
         </button>
-      </div>
+      </div> */}
     </footer>
   )
 }

@@ -314,6 +314,8 @@ export default function ThemePage({ storeInfo, onOpenCompare }: ThemePageProps) 
               <InlineSpinner size="sm" />
             ) : themePeersCount != null ? (
               themePeersCount.toLocaleString()
+            ) : displayName.toLowerCase() === 'unknown' || displayName === '—' ? (
+              '?'
             ) : (
               '—'
             )}
