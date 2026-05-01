@@ -51,6 +51,9 @@ import {
 import { syncPopupStoreData } from '../windowStoreData'
 import { useSpykitStore } from '../store/useSpykitStore'
 
+/** Set to true to show the Store tab debug tools (Theme / Apps / meta.json, etc.). */
+const ENABLE_DEBUG = false
+
 /** Shown until the popup receives the first `GET_STORE_INFO` response. */
 function StoreTabSkeleton() {
   return (
@@ -873,74 +876,78 @@ export default function OverviewPage({
 
       </div>
 
-      <p className="section-title store-debug-section-title">
-        <Bug size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-        Debug
-      </p>
-      <div className="store-debug-panel">
-        <p className="store-debug-hint">
-          Runs against the last-focused normal window tab (storefront). Results sync to cache and Zustand; details log here.
-        </p>
-        <p className="store-debug-hint">
-          Stores library: {themePeersLoading ? 'loading…' : (storesLibraryCount != null ? `${fmt(storesLibraryCount)} stores` : 'unavailable')}
-        </p>
-        <div className="store-debug-actions">
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugTheme()}
-            title="Inject / rerun page-world: read window.Shopify.theme → PAGE_DATA → storage"
-          >
-            Theme
-          </button>
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugApps()}
-            title="Content script: fetch apps.json catalog + scan DOM/scripts → merge into PAGE_DATA"
-          >
-            Apps
-          </button>
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugCollectionProducts()}
-            title="Background: fetch per-collection products.json and attach product _collections"
-          >
-            Collection Products
-          </button>
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugFetchThemeFromHtml()}
-            title="Fetches HTML and parses Shopify.theme in popup"
-          >
-            Fetch Theme
-          </button>
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugFetchAppsFromHtml()}
-            title="Fetches HTML once, then parses Shopify.theme, app matches, and emails from it"
-          >
-            Fetch App/Theme/Email
-          </button>
-          <button
-            type="button"
-            className="store-debug-btn"
-            disabled={debugBusy || reSyncBusy}
-            onClick={() => void onDebugFetchMetaJson()}
-            title="Fetches /meta.json from active storefront tab and logs it in popup console"
-          >
-            meta.json
-          </button>
+      {ENABLE_DEBUG && (
+        <div className="debug-panel">
+          <p className="section-title store-debug-section-title">
+            <Bug size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            Debug
+          </p>
+          <div className="store-debug-panel">
+            <p className="store-debug-hint">
+              Runs against the last-focused normal window tab (storefront). Results sync to cache and Zustand; details log here.
+            </p>
+            <p className="store-debug-hint">
+              Stores library: {themePeersLoading ? 'loading…' : (storesLibraryCount != null ? `${fmt(storesLibraryCount)} stores` : 'unavailable')}
+            </p>
+            <div className="store-debug-actions">
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugTheme()}
+                title="Inject / rerun page-world: read window.Shopify.theme → PAGE_DATA → storage"
+              >
+                Theme
+              </button>
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugApps()}
+                title="Content script: fetch apps.json catalog + scan DOM/scripts → merge into PAGE_DATA"
+              >
+                Apps
+              </button>
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugCollectionProducts()}
+                title="Background: fetch per-collection products.json and attach product _collections"
+              >
+                Collection Products
+              </button>
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugFetchThemeFromHtml()}
+                title="Fetches HTML and parses Shopify.theme in popup"
+              >
+                Fetch Theme
+              </button>
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugFetchAppsFromHtml()}
+                title="Fetches HTML once, then parses Shopify.theme, app matches, and emails from it"
+              >
+                Fetch App/Theme/Email
+              </button>
+              <button
+                type="button"
+                className="store-debug-btn"
+                disabled={debugBusy || reSyncBusy}
+                onClick={() => void onDebugFetchMetaJson()}
+                title="Fetches /meta.json from active storefront tab and logs it in popup console"
+              >
+                meta.json
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Emails — modal (same shell as ships-to / gallery modals) */}
       {emailsModalOpen && emails.length > 0 && (

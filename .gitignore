@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-zip/
+zipped/
 *.zip
 .env
 .env.production

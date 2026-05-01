@@ -9,9 +9,9 @@ import { defineManifest } from '@crxjs/vite-plugin'
  */
 export default defineManifest((env) => ({
   manifest_version: 3,
-  name: 'Shopify Spy Toolkit',
-  version: '1.3.01',
-  description: 'Spy on any Shopify store — detect theme, apps, products, and more.',
+  name: 'Shopify Spy Toolkit: detect theme, location, apps, products & more',
+  version: '1.3.2',
+  description: 'Spy on any Shopify store. View apps being used with accuracy.',
 
   // Uncomment and populate for local dev (omit when creating Web Store zip):
   // key: process.env.VITE_CRX_KEY,
